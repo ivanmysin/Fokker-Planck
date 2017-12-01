@@ -21,7 +21,7 @@ Iext : amp
 '''
 
 group = NeuronGroup(n, eqs, threshold='v > -50*mV', reset='v = -60*mV',
-                    refractory=5*ms, method="milstein")
+                    refractory=5*ms, method="milstein", dt=1*ms)
 
 group.v = "(-60 + 10*randn() ) * mV"
 group.ge = 0 * msiemens * cm**-2 * area

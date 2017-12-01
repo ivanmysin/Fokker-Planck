@@ -10,7 +10,7 @@ randn = np.random.randn
 Ne = 800
 Ni = 200
 
-duration=5000
+duration=1000
 
 
 params_array = [
@@ -79,5 +79,8 @@ for idx, params in enumerate(params_array):
 
 fig1.show()
 fig2.show()
+
+
+
 plt.show(block=True)
 
