@@ -19,7 +19,7 @@ muext : volt
 """
 
 group = NeuronGroup(N, eqs, threshold='V>theta',
-                    reset='V=Vr', refractory=taurefr, method='euler', dt="0.1*ms")
+                    reset='V=Vr', refractory=taurefr, method='euler', dt=0.1*ms)
 group.V = "Vr + 5 * randn() * mV"
 group.muext =  "(20 + randn()*5)*mV" # "20 * mV" #
 
