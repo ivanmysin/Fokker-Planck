@@ -4,6 +4,8 @@ from scipy.signal import gaussian
 from scipy.stats import pearsonr
 import itertools
 import matplotlib.pyplot as plt
+import brian2 as br2
+# br2.set_device('cpp_standalone')
 
 def conv_spike_trains(spike_trains, std=50, tmax=None):
 
@@ -128,3 +130,68 @@ def model_network(Ne, Ni, params, duration=2000):
         u = u + a * (b * v - u)
 
     return firings
+
+def LIF_network(Ne, Ni, params, duration=2000):
+
+
+    N = Ne + Ni
+    Vr = 0 * br2.mV
+    theta = 20 * br2.mV
+    tau = 20 * br2.ms
+    # delta = 2 * br2.ms
+    taurefr = 5 * br2.ms
+    duration = duration * br2.ms
+    C = 1000
+    sparseness = float(C) / N
+    J = 0.02 * br2.mV
+    # muext = 25*mV
+    # sigmaext = 5 * br2.mV
+
+    eqs = """
+    dV/dt = (-V + muext + sigmaext * sqrt(0.1 * ms) * xi)/tau : volt 
+    muext : volt
+    sigmaext : volt
+    """
+    # tau
+    group = br2.NeuronGroup(N, eqs, threshold='V>theta',
+                        reset='V=Vr', refractory=taurefr, method='euler', dt=0.1*br2.ms)
+    group.V = "Vr + 5 * randn() * mV"
+    Ext = group[:Ne]
+    Inh = group[Ne:]
+
+    Ext.sigmaext = params["Enoise"] * br2.mV
+    Inh.sigmaext = params["Inoise"]  * br2.mV
+
+    if params["Iextmean"] > 0:
+        group.muext = "( 20 + %.4f * randn() )*mV" % params["Iextmean"]
+    else:
+        group.muext = "20 * mV"
+
+
+
+    conn_Ext2all = br2.Synapses(Ext, group, on_pre='V += J * rand()')  # , delay=delta
+    conn_Ext2all.connect(p=sparseness)
+
+    conn_Inh2All = br2.Synapses(Inh, group, on_pre='V -= J * rand()')  # , delay=delta
+    conn_Inh2All.connect(p=sparseness)
+
+    # mon = StateMonitor(group, 'V', record=0)
+
+    M = br2.SpikeMonitor(group)
+
+    br2.run(duration)
+
+
+
+    firings = np.empty((2, 0), dtype=float)
+    spike_trains = []
+    for idx in range(N):
+        sp = M.values("t")[idx] / br2.ms
+
+        if (np.sum(sp) > 0):
+            firings = np.append(firings, np.array( [sp, np.repeat(idx, sp.size)] ), axis=1)
+            spike_trains.append(sp)
+
+    return firings, spike_trains
+
+# LIF_network()

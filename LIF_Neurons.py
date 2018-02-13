@@ -23,8 +23,8 @@ V_states = V_states / V_states.sum()
 
 k = sigma**2 / 2 / tau_m
 
-plt.figure()
-plt.plot(V_range, V_states)
+fig, ax = plt.subplots()
+line, = ax.plot(V_range, V_states)
 plt.show(block=False)
 
 t = 0
@@ -37,12 +37,12 @@ while(t <= duraction):
         a = (-V_st + Iext / gl) / tau_m
 
         if idx == 0:
-            Vst_i_minus_1 = V_states[0]
+            Vst_i_minus_1 = 0
         else:
             Vst_i_minus_1 = V_states[idx - 1]
 
         if idx == n_states - 1:
-            Vst_i_plus_1 = V_states[-1]
+            Vst_i_plus_1 = 0
         else:
             Vst_i_plus_1 = V_states[idx + 1]
 
@@ -53,10 +53,14 @@ while(t <= duraction):
         V_states[idx] = V_st
 
     V_states[0] = V_states[0] + dt * nu / delta_V
+
+    line.set_data(V_range, V_states)
+
     t += dt
 
-plt.show(block=False)
-plt.figure()
-plt.plot(V_range, V_states)
-plt.plot([V_min, V_max], [0, 0])
+# plt.show(block=False)
+# plt.figure()
+# plt.plot(V_range, V_states)
+# plt.plot([V_min, V_max], [0, 0])
 plt.show(block=True)
+print ("End")
