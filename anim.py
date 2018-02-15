@@ -319,7 +319,7 @@ class Fokker_Plank4LIFimplicit(Fokker_Plank4LIF):
 
 
 
-class TransportEquastion:
+class CBRD4LIF:
 
     def __init__(self, dt, dts, Nts, tau_m=10, Vr=0, Vt=10, Iext=15, sigma=1.5):
 
@@ -540,21 +540,21 @@ class Animator:
 #     animator.run(0.5, 1000)
 
 
-def main():
-
-    N = 5000
-    muext = 25 # + 1.5 * np.random.randn(N)
-    sigmaext = 3.5
-    S = np.zeros( [N, N] ) # 2*np.random.rand(N, N)
-
-
-    # np.append(0.5 * rand(Ne + Ni, Ne), -rand(Ne + Ni, Ni), axis=1)
-
-
-    LIF_neurons = MC_LIF_Networks(N, muext, sigmaext, S, tau=20, Vt=20, Vr=5)
-
-    animator = Animator(LIF_neurons, [0, 20, 0, 1000], [0, 0.2, 0, 400], Yappend=False, Xappend=False)
-    animator.run(0.1, 1000, 10)
+# def main():
+#
+#     N = 5000
+#     muext = 25 # + 1.5 * np.random.randn(N)
+#     sigmaext = 3.5
+#     S = np.zeros( [N, N] ) # 2*np.random.rand(N, N)
+#
+#
+#     # np.append(0.5 * rand(Ne + Ni, Ne), -rand(Ne + Ni, Ni), axis=1)
+#
+#
+#     LIF_neurons = MC_LIF_Networks(N, muext, sigmaext, S, tau=20, Vt=20, Vr=5)
+#
+#     animator = Animator(LIF_neurons, [0, 20, 0, 1000], [0, 0.2, 0, 400], Yappend=False, Xappend=False)
+#     animator.run(0.1, 1000, 10)
 
 
 # def main():
@@ -593,21 +593,21 @@ def main():
 #     print (stability)
 #     animator.run(dt, 1000, 10)
 
-#
-# def main():
-#
-#
-# # solve transport equation
-#     Nts = 400
-#     dt = 0.1
-#     dts = 0.5
-#
-#     he = TransportEquastion(dt, dts, Nts)
-#
-#     animator = Animator(he, [0, 200, 0, 1000], [0, 1.2, 0, 1000], Yappend=False, Xappend=False)
-#
-#
-#     animator.run(dt, 1000, 10)
+
+def main():
+
+
+# solve cbrd equation
+    Nts = 400
+    dt = 0.1
+    dts = 0.5
+
+    cbrd = CBRD4LIF(dt, dts, Nts)
+
+    animator = Animator(cbrd, [0, 200, 0, 1000], [0, 1.2, 0, 1000], Yappend=False, Xappend=False)
+
+
+    animator.run(dt, 1000, 10)
 
 
 
