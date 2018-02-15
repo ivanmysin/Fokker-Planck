@@ -24,7 +24,7 @@ class Neuron:
 
         self.V += dt * dVdt
 
-        return self.V, dVdt
+        return self.V, dVdt, self.g_tot, self.C
 
     def reset(self, another_neuron):
 
@@ -42,14 +42,13 @@ class State:
         self.max_ts = max_ts
         self.isnotlast = True
 
-    def H_function(self, dt, V, dVdt):
-        g_tot = self.neuron.g_tot
-        tau_m = self.neuron.C / g_tot
+    def H_function(self, dt, V, dVdt, g_tot, C):
+        tau_m = C / g_tot
         k = tau_m / dt
 
 
         T = np.sqrt(0.5 * (1 + k)) * g_tot * (self.Vt - V) / self.sigma
-        # print ((self.Vt - V))
+
 
         A_inf = np.exp(0.0061 - 1.12 * T - 0.257 * T**2 - 0.072 * T**3 - 0.0117 * T**4)
         A = A_inf * (1 - (1 + k)**(-0.71 + 0.0825 * (T + 3)))
@@ -81,8 +80,8 @@ class State:
 
     def update(self, dt):
 
-        V, dVdt = self.neuron.update(dt)
-        H = self.H_function(dt, V, dVdt)
+        V, dVdt, g_tot, C = self.neuron.update(dt)
+        H = self.H_function(dt, V, dVdt, g_tot, C)
         ph = self.P * H
 
         self.P -= ph
@@ -208,12 +207,12 @@ class Animator:
 def main():
 
     neuron_params = {
-        "Vreset" : 0, # -65,
-        "Vt" : 10, # -50,
-        "gl" : 0.5,
-        "El" : 0, # -65,
-        "C" : 3,
-        "Iext" : 5,
+        "Vreset" : -60,
+        "Vt" : -50,
+        "gl" : 0.1,
+        "El" : -60,
+        "C" : 1,
+        "Iext" : 1.5,
     }
 
     dts = 0.5
@@ -221,11 +220,11 @@ def main():
     sigma = 1.5
 
     dt = 0.1
-    duration = 400
+    duration = 100
     cbrd = CBRD(dts, Nts, neuron_params, sigma)
 
-    animator = Animator(cbrd, [0, 200, 0, 500], [0, 1.2, 0, 1000])
-    animator.run(dt, duration, 10)
+    animator = Animator(cbrd, [0, 200, 0, 100], [0, 1.2, 0, 1000])
+    animator.run(dt, duration, 1)
 
     # cbrd.run(dt, duration)
 

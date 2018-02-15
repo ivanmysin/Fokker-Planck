@@ -5,6 +5,7 @@ class Channel:
     def __init__(self, gmax, E, V, x=None, y=None):
         self.gmax = gmax
         self.E = E
+        self.g = 0
         if not x is None:
             self.x = self.get_x_inf(V)
         else:
@@ -16,25 +17,25 @@ class Channel:
             self.y = None
 
     def update(self, dt, V):
+        self.g = self.gmax
         if not (self.x is None):
             x_inf = self.get_x_inf(V)
             tau_x = self.get_tau_x(V)
             self.x = x_inf - (x_inf - self.x) * np.exp(-dt / tau_x)
-            x = self.x
-        else:
-            x = 1
+            self.g *= self.x
 
         if not (self.y is None):
             y_inf = self.get_y_inf(V)
             tau_y = self.get_tau_y(V)
             self.y = y_inf - (y_inf - self.y) * np.exp(-dt / tau_y)
-            y = self.y
-        else:
-            y = 1
+            self.g *= self.y
 
-        I = self.gmax * x * y * (V - self.E)
-
+    def get_I(self, V):
+        I = self.g * (V - self.E)
         return I
+
+    def get_g(self):
+        return self.g
 
     def reset(self):
         pass
@@ -136,25 +137,18 @@ class A_channel(Channel):
         return y_inf
 
     def update(self, dt, V):
+        self.g = self.gmax
         if not (self.x is None):
             x_inf = self.get_x_inf(V)
             tau_x = self.get_tau_x(V)
             self.x = x_inf - (x_inf - self.x) * np.exp(-dt / tau_x)
-            x = self.x
-        else:
-            x = 1
+            self.g *= self.x**4
 
         if not (self.y is None):
             y_inf = self.get_y_inf(V)
             tau_y = self.get_tau_y(V)
             self.y = y_inf - (y_inf - self.y) * np.exp(-dt / tau_y)
-            y = self.y
-        else:
-            y = 1
-
-        I = self.gmax * x**4 * y**3 * (V - self.E)
-
-        return I
+            self.g *= self.y**3
 
 
 class M_channel(Channel):
@@ -186,8 +180,8 @@ class M_channel(Channel):
         x_inf = self.get_x_inf(V)
         tau_x = self.get_tau_x(V)
         self.x = x_inf - (x_inf - self.x) * np.exp(-dt / tau_x)
-        I = self.gmax * self.x**2 * (V - self.E)
-        return I
+        self.g = self.gmax * self.x**2
+
 
 class AHP_Channel(Channel):
 
@@ -203,13 +197,21 @@ class AHP_Channel(Channel):
         self.x += 0.018*(1 - self.x)
 
 class BorgGrahamNeuron:
-    def __init__(self, params, channels):
+    def __init__(self, params):
         self.V = params["V0"]
         self.C = params["C"]
         self.Vreset = params["Vreset"]
         self.Vth = params["Vth"]
         self.Iext = params["Iext"]
-        self.channels = channels
+
+        leak = Channel(params["leak"]["g"], params["leak"]["E"], self.V)
+        dr_current = KDR_Channel(params["dr_current"]["g"], params["dr_current"]["E"], self.V, 1, 1)
+        a_current = A_channel(params["a_current"]["g"],params["a_current"]["E"], self.V, 1, 1)
+        m_current = M_channel(params["m_current"]["g"], params["m_current"]["E"], self.V, 1)
+        ahp = AHP_Channel(params["ahp"]["g"], params["ahp"]["E"], self.V, 1)
+
+        self.channels = [leak, dr_current, a_current, m_current, ahp]
+
 
         self.Vhist = [self.V]
 
@@ -219,62 +221,63 @@ class BorgGrahamNeuron:
         self.refactory = 1.5
 
 
-    def update_vth(self):
-        self.Vth = (-85 + 400 / self.ts)
+    def reset(self, another_neuron = None):
+        self.V = self.Vreset
+        self.ts = 0
+        for ch in self.channels:
+            ch.reset()
 
     def update(self, dt):
 
         I = 0
-
+        g_tot = 0
         for ch in self.channels:
-            I -= ch.update(dt, self.V)
+            ch.update(dt, self.V)
+            I -= ch.get_I(self.V)
+            g_tot += ch.get_g()
 
         I += self.Iext
-
-        self.V += dt * I / self.C
+        dVdt = I / self.C
+        self.V += dt * dVdt
         self.Vth = max(-50, (-85 + 400 / self.ts))
 
 
         if self.V > self.Vth and self.ts > self.refactory:
-            self.V = self.Vreset
-            self.ts = 0
-            for ch in self.channels:
-                ch.reset()
+            self.reset()
 
         self.t += dt
         self.ts += dt
 
         self.Vhist.append(self.V)
 
+        return self.V, dVdt, g_tot, self.C
+
 ###################################################################
-
-neuron_params = {
-    "V0" : -65,
-    "C" : 0.7,
-    "Vreset" : -40,
-    "Vth" : -50,
-    "Iext" : 5.15,
-}
-
-leak = Channel(0.07, -65, neuron_params["V0"])
-dr_current = KDR_Channel(0.76, -70, neuron_params["V0"], 1, 1)
-a_current = A_channel(4.36, -70, neuron_params["V0"], 1, 1)
-
-m_current = M_channel(0.76, -80, neuron_params["V0"], 1)
-ahp = AHP_Channel(0.6, -70, neuron_params["V0"], 1)
+def main():
+    neuron_params = {
+        "V0" : -65,
+        "C" : 0.7,
+        "Vreset" : -40,
+        "Vth" : -50,
+        "Iext" : 5.15,
+        "leak"  : {"E" : -65, "g" : 0.07},
+        "dr_current" : {"E" : -70, "g" : 0.76, "x" : 1, "y" : 1},
+        "a_current": {"E": -70, "g": 4.36, "x": 1, "y": 1},
+        "m_current": {"E": -80, "g": 0.76, "x": 1, "y": None},
+        "ahp": {"E": -70, "g": 0.6, "x": 1, "y": None},
+    }
 
 
-
-
-channels = [leak, dr_current, a_current, m_current, ahp]
-neuron = BorgGrahamNeuron(neuron_params, channels)
+    neuron = BorgGrahamNeuron(neuron_params)
 
 
 
-for _ in range(10000):
-    neuron.update(0.1)
+    for _ in range(10000):
+        neuron.update(0.1)
 
-t = np.linspace(0, 1, len(neuron.Vhist) )
-plt.plot(t, neuron.Vhist)
-plt.show()
+    t = np.linspace(0, 1000, len(neuron.Vhist) )
+    plt.plot(t, neuron.Vhist)
+    plt.show()
 
+if __name__ == "__main__":
+    main()

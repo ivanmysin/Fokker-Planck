@@ -604,10 +604,10 @@ def main():
 
     cbrd = CBRD4LIF(dt, dts, Nts)
 
-    animator = Animator(cbrd, [0, 200, 0, 1000], [0, 1.2, 0, 1000], Yappend=False, Xappend=False)
+    animator = Animator(cbrd, [0, 200, 0, 100], [0, 1.2, 0, 1000], Yappend=False, Xappend=False)
 
 
-    animator.run(dt, 1000, 10)
+    animator.run(dt, 100, 10)
 
 
 
