@@ -201,8 +201,9 @@ class BorgGrahamNeuron:
         self.V = params["V0"]
         self.C = params["C"]
         self.Vreset = params["Vreset"]
-        self.Vth = params["Vth"]
+        self.Vth = params["Vt"]
         self.Iext = params["Iext"]
+        self.saveV = params["saveV"]
 
         leak = Channel(params["leak"]["g"], params["leak"]["E"], self.V)
         dr_current = KDR_Channel(params["dr_current"]["g"], params["dr_current"]["E"], self.V, 1, 1)
@@ -212,8 +213,8 @@ class BorgGrahamNeuron:
 
         self.channels = [leak, dr_current, a_current, m_current, ahp]
 
-
-        self.Vhist = [self.V]
+        if  self.saveV:
+            self.Vhist = [self.V]
 
         self.t = 0
         self.ts = 200
@@ -224,7 +225,12 @@ class BorgGrahamNeuron:
     def reset(self, another_neuron = None):
         self.V = self.Vreset
         self.ts = 0
-        for ch in self.channels:
+
+
+        for idx, ch in enumerate(self.channels):
+            if not another_neuron is None:
+                ch.x = another_neuron.channels[idx].x
+                ch.y = another_neuron.channels[idx].y
             ch.reset()
 
     def update(self, dt):
@@ -239,16 +245,17 @@ class BorgGrahamNeuron:
         I += self.Iext
         dVdt = I / self.C
         self.V += dt * dVdt
-        self.Vth = max(-50, (-85 + 400 / self.ts))
 
-
-        if self.V > self.Vth and self.ts > self.refactory:
-            self.reset()
+        if self.saveV:
+            self.Vth = max(-50, (-85 + 400 / self.ts))
+            if self.V > self.Vth and self.ts > self.refactory:
+                self.reset()
 
         self.t += dt
         self.ts += dt
 
-        self.Vhist.append(self.V)
+        if self.saveV:
+            self.Vhist.append(self.V)
 
         return self.V, dVdt, g_tot, self.C
 
@@ -258,8 +265,9 @@ def main():
         "V0" : -65,
         "C" : 0.7,
         "Vreset" : -40,
-        "Vth" : -50,
+        "Vt" : -50,
         "Iext" : 5.15,
+        "saveV": True,
         "leak"  : {"E" : -65, "g" : 0.07},
         "dr_current" : {"E" : -70, "g" : 0.76, "x" : 1, "y" : 1},
         "a_current": {"E": -70, "g": 4.36, "x": 1, "y": 1},
@@ -272,10 +280,10 @@ def main():
 
 
 
-    for _ in range(10000):
+    for _ in range(1000):
         neuron.update(0.1)
 
-    t = np.linspace(0, 1000, len(neuron.Vhist) )
+    t = np.linspace(0, 100, len(neuron.Vhist) )
     plt.plot(t, neuron.Vhist)
     plt.show()
 
