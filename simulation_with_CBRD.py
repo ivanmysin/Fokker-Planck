@@ -6,36 +6,6 @@ from scipy.special import erf
 
 import Models4CBRD as Mods
 
-class LIF_Neuron:
-
-    def __init__(self, params):
-        self.Vreset = params["Vreset"]
-        self.Vt = params["Vt"]
-        self.gl = params["gl"]
-        self.El = params["El"]
-        self.C = params["C"]
-        self.V = self.Vreset
-        self.Iext = params["Iext"]
-        self.g_tot = self.gl
-
-        self.Isyn = 0
-
-    def add_Isyn(self, Isyn):
-        self.Isyn += Isyn
-
-    def update(self, dt):
-
-        dVdt = ( self.gl*(self.El - self.V) + self.Iext + self.Isyn) / self.C
-        # print (self.Isyn)
-        self.V += dt * dVdt
-        self.Isyn = 0
-        return self.V, dVdt, self.g_tot, self.C
-
-    def reset(self, another_neuron):
-
-        self.V = self.Vreset
-
-
 class State:
 
     def __init__(self, neuron, P, Vt, refactory, sigma, ts, max_ts):
@@ -287,7 +257,7 @@ class Network:
 
 ###########################################################################
 def main():
-    N_cbrd = 1
+    N_cbrd = 15
 
     neuron_params = {
         "Vreset" : 0, # -60,
@@ -316,7 +286,7 @@ def main():
 
     N_syns = 0
     synapse_params = {
-        "w" : 200.2,
+        "w" : 5.2,
         "pre_idx": 0,
         "post_idx": 0,
 
@@ -336,9 +306,9 @@ def main():
 
         params_tmp = neuron_params.copy()
 
-        #params_tmp["Iext"] += 0.5 * np.random.randn()
+        params_tmp["Iext"] += 0.15 * np.random.randn()
 
-        cbrd = CBRD(dts, Nts, params_tmp, sigma, LIF_Neuron) #     Mods.BorgGrahamNeuron
+        cbrd = CBRD(dts, Nts, params_tmp, sigma, Mods.LIF_Neuron) #     Mods.BorgGrahamNeuron
         list_of_cdrd.append(cbrd)
 
     for idx in range(N_syns):
@@ -354,7 +324,7 @@ def main():
 
     net = Network(list_of_cdrd, synapses)
 
-    animator = Animator(net, [0, 200, 0, duration], [0, 0.2, 0, 200])
+    animator = Animator(net, [0, 200, 0, duration], [0, 1, 0, 1000])
     animator.run(dt, duration, 0)
 
     # cbrd.run(dt, duration)

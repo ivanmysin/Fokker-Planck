@@ -1,6 +1,21 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+class Neuron:
+
+    def __init__(self, params):
+        self.V = params["V0"]
+
+    def add_Isyn(self, Isyn):
+        pass
+
+    def update(self, dt):
+        return 0, 0, 0, 0
+
+    def reset(self, another_neuron):
+        self.V = self.Vreset
+
+
 class Channel:
     def __init__(self, gmax, E, V, x=None, y=None):
         self.gmax = gmax
@@ -196,7 +211,7 @@ class AHP_Channel(Channel):
     def reset(self):
         self.x += 0.018*(1 - self.x)
 
-class BorgGrahamNeuron:
+class BorgGrahamNeuron(Neuron):
     def __init__(self, params):
         self.V = params["V0"]
         self.C = params["C"]
@@ -258,7 +273,97 @@ class BorgGrahamNeuron:
             self.Vhist.append(self.V)
 
         return self.V, dVdt, g_tot, self.C
+#########################################################################
+class LIF_Neuron(Neuron):
 
+    def __init__(self, params):
+        self.Vreset = params["Vreset"]
+        self.Vt = params["Vt"]
+        self.gl = params["gl"]
+        self.El = params["El"]
+        self.C = params["C"]
+        self.V = self.Vreset
+        self.Iext = params["Iext"]
+        self.g_tot = self.gl
+
+        self.Isyn = 0
+
+        self.t = 0
+
+    def add_Isyn(self, Isyn):
+        self.Isyn += Isyn
+
+    def update(self, dt):
+        dVdt = (self.gl * (self.El - self.V) + self.Iext + self.Isyn) / self.C
+        # print (self.Isyn)
+        self.V += dt * dVdt
+        self.Isyn = 0
+        self.t += dt
+
+        return self.V, dVdt, self.g_tot, self.C
+
+    def reset(self, another_neuron):
+        self.V = self.Vreset
+
+###################################################################
+class  SineGenerator(Neuron):
+    def __init__(self, params):
+
+        self.fr = params["fr"]
+
+        self.phase = params["phase"]
+
+        self.amp_max = params["amp_max"]
+
+        self.amp_min = params["amp_min"]
+
+        self.flow = 0
+
+        self.t = 0
+
+    def update(self, dt):
+        self.flow = np.cos(2*np.pi*self.fr*self.t + self.phase)
+        self.t += dt
+
+        return 0, 0, self.flow, 0
+
+    def get_flow(self):
+        return self.flow
+
+    def add_Isyn(self, Isyn):
+        pass
+
+
+class PoissonGenerator:
+    def __init__(self, params):
+
+        self.fr = params["fr"]
+        self.w = params["w"]
+        self.refactory = params["refactory"]
+
+        self.flow = 0
+        self.previos_t = 0
+
+
+    def update(self, dt):
+        self.flow = 0
+
+        r = 1000 * np.random.rand() / dt
+
+        if (r < self.fr) and (self.previos_t > self.refactory):
+            self.flow = self.w
+
+            self.previos_t = 0
+
+        self.previos_t += dt
+
+        return 0, 0, self.flow, 0
+
+    def get_flow(self):
+        return self.flow
+
+    def add_Isyn(self, Isyn):
+        pass
 ###################################################################
 def main():
     neuron_params = {
@@ -288,4 +393,19 @@ def main():
     plt.show()
 
 if __name__ == "__main__":
-    main()
+    #main()
+    import matplotlib.pyplot as plt
+    params = {
+        "fr" : 10,
+        "w" : 1,
+        "refactory" : 1.5,
+    }
+    p = PoissonGenerator(params)
+    dt = 0.1
+    t = np.linspace(0.1, 10000, 1)
+    pr = np.array([])
+    for _ in range(10000):
+        pr = np.append(pr, p.update(dt))
+
+    plt.plot(pr)
+    plt.show()
