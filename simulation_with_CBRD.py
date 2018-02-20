@@ -22,7 +22,7 @@ class State:
 
     def H_function(self, dt, V, dVdt, g_tot, C):
 
-        # print (dt, V, dVdt, g_tot, C)
+        # print (V, dVdt, g_tot, C)
 
         tau_m = C / g_tot
          # k = tau_m / dt
@@ -45,7 +45,6 @@ class State:
 
         B = -np.sqrt(2) * dT_dt * F_T * tau_m
 
-        self.tmp_var = B
 
 
         H = (A + B) / tau_m
@@ -55,7 +54,7 @@ class State:
         #
         # if (H < 0):
         #     H = 0
-        # print(H)
+        # print(T)
         # print("###################")
         return H
 
@@ -175,7 +174,7 @@ class CBRD:
 class Animator:
     def __init__(self, model, xlim, ylim):
 
-        self.Fig, self.ax = plt.subplots(nrows=2, ncols=1)
+        self.Fig, self.ax = plt.subplots(nrows=3, ncols=1)
         self.line1, = self.ax[0].plot([], [], 'b', animated=True)
         self.time_text = self.ax[0].text(0.05, 0.9, '', transform=self.ax[0].transAxes)
 
@@ -188,17 +187,23 @@ class Animator:
         self.ax[1].set_xlim(xlim[2], xlim[3])
         self.ax[1].set_ylim(ylim[2], ylim[3])
 
+
+        self.line3, = self.ax[2].plot([], [], 'b', animated=True)
+
+        self.ax[2].set_xlim(xlim[4], xlim[5])
+        self.ax[2].set_ylim(ylim[4], ylim[5])
+
+
         self.model = model
 
 
     def update_on_plot(self, idx):
 
-        x1, y1, x2, y2 = self.model.update(self.dt)
+        x1, y1, x2, y2, x3, y3 = self.model.update(self.dt)
 
 
         #vself.ax[0].set_xlim(x1.min(), x1.max())
         # self.ax[0].set_ylim(0.8 * y1.min(), 1.2 * y1.max())
-        #
         # self.ax[1].set_ylim(0.8 * y2.min(), 1.2 * y2.max())
 
         self.line1.set_data(x1, y1)
@@ -206,7 +211,9 @@ class Animator:
 
         self.line2.set_data(x2, y2)
 
-        return [self.line1, self.time_text, self.line2]
+        self.line3.set_data(x3, y3)
+
+        return [self.line1, self.time_text, self.line2, self.line3]
 
     def run(self, dt, duration, interval=10):
 
@@ -245,19 +252,25 @@ class Network:
             sum_Pts += Pts
             sum_flow_y += flow_y
 
-        sum_Pts /= len(self.list_of_cbrd)
-        sum_flow_y /= len(self.list_of_cbrd)
+        #sum_Pts /= len(self.list_of_cbrd)
+        #sum_flow_y /= len(self.list_of_cbrd)
 
         for synapse in self.synapses:
             synapse.update(dt)
 
-        return ts_states, sum_Pts, flow_x, sum_flow_y
+        return ts_states, sum_Pts, flow_x, sum_flow_y, [], [] #flow_x, self.list_of_cbrd[0].get_hist()
 
+    def ppv(self):
+        tp = 1
+        fp = 0
+        ppv = tp / (tp + fp)
+
+        return ppv
 
 
 ###########################################################################
 def main():
-    N_cbrd = 15
+    N_cbrd = 1
 
     neuron_params = {
         "Vreset" : 0, # -60,
@@ -268,13 +281,28 @@ def main():
         "Iext" : 0.15,
         "refactory": 0,
     }
-    #
+
+    params4poisson = {
+        "fr" : 20,
+        "w" : 0.1,
+        "refactory" : 1.5,
+        "length" : 5,
+    }
+
+    params4sine = {
+        "fr" : 30,
+        "phase" : 0,
+        "amp_max" : 0.05,
+        "amp_min" : -0.05,
+    }
+
+
     # neuron_params = {
     #     "V0" : -65,
     #     "C" : 0.7,
     #     "Vreset" : -40,
     #     "Vt" : -50,
-    #     "Iext" : 3.15,
+    #     "Iext" : 5.15,
     #     "refactory" : 1.5,
     #     "saveV"  : False,
     #     "leak"  : {"E" : -65, "g" : 0.07},
@@ -294,37 +322,42 @@ def main():
 
     dts = 0.5
     Nts = 400
-    sigma = 2.0
+    sigma = 2
 
     dt = 0.1
-    duration = 150
+    duration = 200
 
     list_of_cdrd = []
     synapses = []
+
+    #sine = Mods.SineGenerator(params4sine)
+    poisson = Mods.PoissonGenerator(params4poisson)
+
+    #list_of_cdrd.append(poisson)
 
     for idx in range(N_cbrd):
 
         params_tmp = neuron_params.copy()
 
-        params_tmp["Iext"] += 0.15 * np.random.randn()
+        # params_tmp["Iext"] += 0.15 * np.random.randn()
 
-        cbrd = CBRD(dts, Nts, params_tmp, sigma, Mods.LIF_Neuron) #     Mods.BorgGrahamNeuron
+        cbrd = CBRD(dts, Nts, params_tmp, sigma, Mods.LIF_Neuron) #        #Mods.BorgGrahamNeuron
         list_of_cdrd.append(cbrd)
 
     for idx in range(N_syns):
 
         params_tmp = synapse_params.copy()
 
-        params_tmp["pre"] = list_of_cdrd[params_tmp["pre_idx"]]
+        params_tmp["pre"] = list_of_cdrd[0]
 
-        params_tmp["post"] = list_of_cdrd[params_tmp["post_idx"]]
+        params_tmp["post"] = list_of_cdrd[idx + 1]
         synapse = Synapse(params_tmp)
 
         synapses.append(synapse)
 
     net = Network(list_of_cdrd, synapses)
 
-    animator = Animator(net, [0, 200, 0, duration], [0, 1, 0, 1000])
+    animator = Animator(net, [0, 200, 0, duration, 0, duration], [0, 1, 0, 1000, -0.2, 0.2])
     animator.run(dt, duration, 0)
 
     # cbrd.run(dt, duration)

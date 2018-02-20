@@ -316,15 +316,14 @@ class  SineGenerator(Neuron):
         self.amp_max = params["amp_max"]
 
         self.amp_min = params["amp_min"]
-
         self.flow = 0
-
         self.t = 0
+        self.hist = []
 
     def update(self, dt):
-        self.flow = np.cos(2*np.pi*self.fr*self.t + self.phase)
-        self.t += dt
-
+        self.flow = 0.5 * (np.cos(2*np.pi*self.fr*self.t + self.phase) + 1) * (self.amp_max - self.amp_min) + self.amp_min
+        self.t += 0.001 * dt
+        self.hist.append(self.flow)
         return 0, 0, self.flow, 0
 
     def get_flow(self):
@@ -333,6 +332,8 @@ class  SineGenerator(Neuron):
     def add_Isyn(self, Isyn):
         pass
 
+    def get_hist(self):
+        return np.asarray(self.hist)
 
 class PoissonGenerator:
     def __init__(self, params):
@@ -340,24 +341,40 @@ class PoissonGenerator:
         self.fr = params["fr"]
         self.w = params["w"]
         self.refactory = params["refactory"]
+        self.length = params["length"]
 
         self.flow = 0
-        self.previos_t = 0
+        self.previos_t = params["refactory"] + 10
+        self.start = self.length + 1
+
+        self.hist = []
 
 
     def update(self, dt):
-        self.flow = 0
 
-        r = 1000 * np.random.rand() / dt
+        if self.flow == self.w:
+            self.start += dt
+            if self.start >= self.length:
+                self.flow = 0
+                self.previos_t = 0
 
-        if (r < self.fr) and (self.previos_t > self.refactory):
-            self.flow = self.w
+        elif self.flow == 0:
 
-            self.previos_t = 0
+            if self.previos_t > self.refactory:
+                r = 1000 * np.random.rand() / dt
+                if (r < self.fr):
+                    self.flow = self.w
+                    self.start = 0
+
+
 
         self.previos_t += dt
-
+        self.hist.append(self.flow)
         return 0, 0, self.flow, 0
+
+
+    def get_hist(self):
+        return np.asarray(self.hist)
 
     def get_flow(self):
         return self.flow
@@ -393,19 +410,34 @@ def main():
     plt.show()
 
 if __name__ == "__main__":
-    #main()
-    import matplotlib.pyplot as plt
-    params = {
-        "fr" : 10,
-        "w" : 1,
-        "refactory" : 1.5,
-    }
-    p = PoissonGenerator(params)
-    dt = 0.1
-    t = np.linspace(0.1, 10000, 1)
-    pr = np.array([])
-    for _ in range(10000):
-        pr = np.append(pr, p.update(dt))
-
-    plt.plot(pr)
-    plt.show()
+    main()
+    # import matplotlib.pyplot as plt
+    # params4poisson = {
+    #     "fr" : 10,
+    #     "w" : 1,
+    #     "refactory" : 1.5,
+    #     "length" : 0.5,
+    # }
+    #
+    #
+    #
+    #
+    # params4sine = {
+    #     "fr" : 10,
+    #     "phase" : 0,
+    #     "amp_max" : 0.15,
+    #     "amp_min" : -0.3,
+    # }
+    #
+    #
+    #
+    # p = SineGenerator(params4sine) #PoissonGenerator(params4poisson)
+    # dt = 0.1
+    #
+    # pr = np.array([])
+    # for _ in range(10000):
+    #     pr = np.append(pr, p.update(dt)[2])
+    #
+    # t = np.linspace(0, 1, pr.size)
+    # plt.plot(t, pr)
+    # plt.show()
