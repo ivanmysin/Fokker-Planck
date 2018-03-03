@@ -1,20 +1,28 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.special import erf
+
+def H_function(V, dVdt, tau_m, Vt, sigma):
+    T = (Vt - V) / sigma / np.sqrt(2)
+
+    A = np.exp(0.0061 - 1.12 * T - 0.257 * T ** 2 - 0.072 * T ** 3 - 0.0117 * T ** 4)
+    dT_dt = -1.0 / sigma / np.sqrt(2) * dVdt
+    dT_dt[dT_dt > 0] = 0
+    F_T = np.sqrt(2 / np.pi) * np.exp(-T ** 2) / (1.000000001 + erf(T))
+    B = -np.sqrt(2) * dT_dt * F_T * tau_m
+
+    H = (A + B) / tau_m
+    return H
+
+V = -60
+dVdt = np.array([0.1])
+tau_m = 10
+Vt = -58
+sigma = 0.2
 
 
+H = H_function(V, dVdt, tau_m, Vt, sigma)
 
-theta_phase = np.linspace(-np.pi, np.pi, 200)
-theta_wave = 0.5 * (np.cos(theta_phase) + 1)
 
-gamma_phase = theta_phase * 8
-
-gamma_wave = 0.2 * (0.5 * (np.cos(gamma_phase) + 1)) * theta_wave
-
-gamma_wave = np.roll(gamma_wave, 70)
-
-plt.plot(theta_phase, theta_wave)
-
-plt.plot(theta_phase, gamma_wave)
-
-plt.show()
+print (H)

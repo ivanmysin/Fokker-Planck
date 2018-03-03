@@ -44,7 +44,7 @@ class CBRD:
             shift = True
 
             # self.ro /= np.sum(self.ro) * self.dts
-            print (np.sum(self.ro) * self.dts)
+            # print (np.sum(self.ro) * self.dts)
 
 
         H = self.H_function(self.V, dVdt, tau_m, self.Vt, self.sigma)
@@ -93,6 +93,8 @@ class LIF_Neuron(Neuron):
         self.C = params["C"]
         self.sigma = params["sigma"]
 
+        self.refactory = params["refactory"]
+
         self.Iext = params["Iext"]
         self.g_tot = self.gl
 
@@ -104,12 +106,15 @@ class LIF_Neuron(Neuron):
             CBRD.__init__(self, params["Nro"], params["dts"])
             self.V = np.zeros(self.Nro) + self.Vreset
 
+            self.ref_idx = self.refactory // self.dts
+
             if not params["tau_t"] is None:
                 self.Vt -= np.exp(-params["tau_t"] / (self.t_states + 0.000001) )
 
 
         if self.internal_reset:
             self.Vhist = []
+
 
         self.tau_m = self.C / self.g_tot
         self.Isyn = 0
@@ -123,12 +128,12 @@ class LIF_Neuron(Neuron):
 
     def update(self, dt):
 
-        print(self.Iext, self.Isyn)
+        # print(self.Iext, self.Isyn)
 
         dVdt = -self.V/self.tau_m + self.Iext/self.tau_m + self.Isyn
 
         #(self.gl * (self.El - self.V) + self.Iext + self.Isyn) / self.C
-        dVdt[:11] = 0
+        dVdt[:self.ref_idx] = 0
 
         self.V += dt * dVdt
         self.Isyn = 0
@@ -142,8 +147,6 @@ class LIF_Neuron(Neuron):
             if shift:
                 self.V[:-1] = np.roll(self.V[:-1], 1)
                 self.V[0] = self.Vreset
-
-                # print( (np.sum(self.ro) + self.ro_H_integral) * self.dts)
 
         self.firings.append(1000 * self.ro[0])
         self.time.append(self.t)
@@ -352,7 +355,7 @@ def main():
         "C" : 0.2,
         "Iext" : 14, # 0.14, # 0.15,
         "sigma" : 3.0 / np.sqrt(2),
-        "refactory": 0,
+        "refactory": 1.5,
         "internal_reset" : False,
         "Nro" : 400,
         "dts" : 0.5,
@@ -361,7 +364,7 @@ def main():
 
 
     synapse_params = {
-        "w" : 10.0,
+        "w" : 20.0,
         "delay" : 2,
         "pre" : 0,
         "post" : 0,
