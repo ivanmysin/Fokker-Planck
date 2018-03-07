@@ -7,7 +7,7 @@ CA1 neuron from
 """
 import numpy as np
 from scipy.optimize import minimize
-from scipy.signal import parzen, argrelmax
+from scipy.signal import parzen, argrelmax, argrelmin
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from scipy.special import erf
@@ -423,6 +423,8 @@ class ClusterNeuron_Th(ClusterNeuron):
         else:
             self.ts = np.zeros_like(self.V) + 200
 
+
+
     def update(self, dt, duration=None):
 
         if (duration is None):
@@ -434,6 +436,8 @@ class ClusterNeuron_Th(ClusterNeuron):
             if not self.is_use_CBRD:
                 self.Vhist.append(self.V)
                 self.nhist.append(self.n)
+                self.qhist.append(self.q)
+
 
             dVdt = self.gNa * (self.ENa - self.V) + self.gK * (self.EK - self.V)
             dVdt += self.gKS * (self.EK - self.V) + self.gH * (self.Eh - self.V)
@@ -453,19 +457,40 @@ class ClusterNeuron_Th(ClusterNeuron):
                     self.p[:-1] = np.roll(self.p[:-1], 1)
                     self.q[:-1] = np.roll(self.q[:-1], 1)
 
+                    self.m[:-1] = np.roll(self.m[:-1], 1)
+                    self.h[:-1] = np.roll(self.h[:-1], 1)
+
+
                     self.V[0] = self.V_reset
                     self.n[0] = self.n_reset
-                    self.H[0] = self.H_reset
+                    self.H[0] += self.H_reset
                     self.p[0] = self.p_reset
-                    self.q[0] = self.q_reset
+                    self.q[0] += self.q_reset
+
+                    self.m[0] = 0
+                    self.h[0] = 0.9
+
+
+
 
             else:
                 spiking = np.logical_and( (self.V >= self.Vt), (self.ts > self.refactory) )
                 self.V[spiking] = self.V_reset
                 self.n[spiking] = self.n_reset
+                self.H[spiking] += self.H_reset
+                self.p[spiking] = self.p_reset
+                self.q[spiking] += self.q_reset
+
+                self.m[spiking] = 0
+                self.h[spiking] = 0.9
+
+
                 self.ts += dt
                 self.ts[spiking] = 0
 
+
+            self.m = self.alpha_m() / (self.alpha_m() + self.beta_m())
+            self.h = self.h_integrate(dt)
             self.n = self.n_integrate(dt)
             self.H = self.H_integrate(dt)
             self.p = self.p_integrate(dt)
@@ -635,14 +660,14 @@ def main_opt():
         "is_use_CBRD" : False,
         "refactory": 5.0,
 
-        "Nro": 400,
-        "dts": 0.5,
+        # "Nro": 400,
+        # "dts": 0.5,
         "N" : 1,
 
     }
 
     cluster_neuron_params = params.copy()
-    cluster_neuron_params["Iextmean"] = 0.5
+    cluster_neuron_params["Iextmean"] = 0.2
     cluster_neuron_params["Iextvarience"] = 0.0
     cluster_neuron_params["fi"] = 5
     cluster_neuron_params["gbarKS"] = 12
@@ -650,12 +675,13 @@ def main_opt():
     cluster_neuron_params["Eh"] = -40.0
     cluster_neuron_params["El"] = -50.0
 
-    cluster_neuron_params["Vt"] = -50.0
-    cluster_neuron_params["V_reset"] = -50.0
-    cluster_neuron_params["n_reset"] = 0.37
-    cluster_neuron_params["p_reset"] = 0.37
-    cluster_neuron_params["q_reset"] = 0.37
-    cluster_neuron_params["H_reset"] = 0.37
+    cluster_neuron_params["Vt"] = -51.5 # -43.835308
+    cluster_neuron_params["V_reset"] = 57.760025
+    cluster_neuron_params["n_reset"] = 0.65 # 0.37
+    cluster_neuron_params["p_reset"] = 0.028  # 0.100481
+
+    cluster_neuron_params["q_reset"] = 0.008 # 0.012506
+    cluster_neuron_params["H_reset"] = 0.008 # 0.008850
 
     dt = 0.1
     duration = 1000
@@ -668,58 +694,77 @@ def main_opt():
 
     t = np.linspace(0, duration, V.size)
 
-    H = np.asarray(neuron.Hhist)
-    n = np.asarray(neuron.nhist)
-
-    p = np.asarray(neuron.phist)
+    # H = np.asarray(neuron.Hhist)
+    # n = np.asarray(neuron.nhist)
+    #
+    # p = np.asarray(neuron.phist)
     q = np.asarray(neuron.qhist)
+    #
+    # m = np.asarray(neuron.mhist)
+    # h = np.asarray(neuron.hhist)
+    #
+    # gNa = cluster_neuron_params["gbarNa"] * m * m * m * h  # * (cluster_neuron_params["ENa"] - V)
+    #
+    # gNa_level = 0.047 # np.percentile(gNa, 25)
+    # Vt_arr = V[gNa < gNa_level]
+    #
+    # Vt = np.max(Vt_arr)
+    # print ("Threshold is %f" % Vt )
+    #
+    # peaks_idx = argrelmax(V)[0]
+    #
+    # V_peaks = V[peaks_idx]
+    # V_peaks = V_peaks[V_peaks > 0]
+    #
+    # V_reset = np.mean(V_peaks)
+    # print("V reset is %f" % V_reset)
+    #
+    # n_reset_arr = n[np.abs(V - V_reset) < 2]
+    # n_reset = np.mean(n_reset_arr)
+    # print("n reset is %f" % n_reset)
+    #
+    # p_reset_arr = p[np.abs(V - V_reset) < 2]
+    # p_reset = np.mean(p_reset_arr)
+    # print("p reset is %f" % p_reset)
+    #
+    #
+    # q_reset_arr = q[argrelmin(q)[0]] - q[(V <= V_reset) & ( (V - V_reset) < -0.5)]
+    # q_reset = np.mean(q_reset_arr)
+    # print("q reset is %f" % q_reset)
+    #
+    # H_reset_arr = H[argrelmin(H)[0]] - H[(V <= V_reset) & ( (V - V_reset) < -0.5)]
+    # H_reset = np.mean(H_reset_arr)
+    # print("H reset is %f" % H_reset)
+    #
+    #
+    # # self.gK = self.gbarK * self.n * self.n * self.n * self.n
+    # # self.gH = self.gbarH * self.H
+    # # self.gKS = self.gbarKS * self.p * self.q
+    #
+    # fig, ax = plt.subplots(nrows=3, ncols=1, sharex=True)
+    #
+    # ax[0].plot(t, V)
+    # ax[0].plot([0, duration], [Vt, Vt], color="red")
+    #
+    # # ax[1].plot(t, neuron.mhist, color="blue", label="m")
+    #
+    # # ax[1].plot(t, n, color="blue", label="n")
+    # ax[1].plot(t, H, color="green", label="H")
+    # # ax[1].plot(t, p, color="black", label="p")
+    # # ax[1].plot(t, q, color="red", label="q")
+    # # ax[1].plot(t, m, color="m", label="m")
+    # # ax[1].plot(t, h, color="c", label="h")
+    #
+    # ax[1].legend()
+    #
+    # ax[2].plot(t, gNa, color="m", label="INa")
+    # ax[2].plot([0, duration], [gNa_level, gNa_level], color="red")
+    # ax[2].legend()
+    #
+    #
+    # plt.show()
 
-    m = np.asarray(neuron.mhist)
-    h = np.asarray(neuron.hhist)
-
-    gNa = cluster_neuron_params["gbarNa"] * m * m * m * h  # * (cluster_neuron_params["ENa"] - V)
-
-    Vt = V[gNa < np.percentile(gNa, 20)]
-    print (Vt.size)
-    print ( np.max(Vt) )
-
-    # self.gK = self.gbarK * self.n * self.n * self.n * self.n
-    # self.gH = self.gbarH * self.H
-    # self.gKS = self.gbarKS * self.p * self.q
-
-    fig, ax = plt.subplots(nrows=3, ncols=1, sharex=True)
-
-    ax[0].plot(t, V)
-
-    # ax[1].plot(t, neuron.mhist, color="blue", label="m")
-
-    ax[1].plot(t, n, color="blue", label="n")
-    ax[1].plot(t, H, color="green", label="H")
-    ax[1].plot(t, p, color="black", label="p")
-    ax[1].plot(t, q, color="red", label="q")
-
-    ax[1].plot(t, m, color="m", label="m")
-    ax[1].plot(t, h, color="c", label="h")
-
-    ax[2].plot(t, gNa, color="m", label="INa")
-    plt.legend()
-
-
-    fig = plt.figure()
-
-    plt.hist(gNa, bins=500)
-
-
-
-
-    plt.show()
-
-
-    # neuron_th = FS_neuron_Th(params)
-    #neuron = FS_neuron(params)
-
-    # neuron.update(dt, duration)
-    # V2 = np.asarray(neuron.Vhist)
+    neuron_th = ClusterNeuron_Th(cluster_neuron_params)
 
     # time_before_spike2 = argrelmax(V2)[0][1 : 50]
 
@@ -727,9 +772,8 @@ def main_opt():
 
 
 
-    # neuron_th.update(dt, duration)
-    #
-    # V1 = np.asarray(neuron_th.Vhist)
+    neuron_th.update(dt, duration)
+    V1 = np.asarray(neuron_th.Vhist)
 
 
 
@@ -779,19 +823,20 @@ def main_opt():
     # t = np.linspace(0, duration / 1000, V2.size)
     #
     #
-    # fig, ax = plt.subplots(nrows=2, ncols=1, sharex=False)
-    #
-    # # ax[0].plot(n_reset, metrics)
-    #
-    # # ax[0].plot(t, V1, color="green")
-    # # ax[0].plot(t, V2, color="red")
-    #
-    # ax[1].plot(t, opt_V, color="green")
-    # ax[1].plot(t, V2, color="red")
-    #
-    #
-    #
-    # plt.show()
+    fig, ax = plt.subplots(nrows=2, ncols=1, sharex=False)
+
+
+    ax[0].plot(t, neuron_th.qhist, color="red")
+    ax[0].plot(t, q, color="green")
+
+
+
+    ax[1].plot(t, V, color="green")
+    ax[1].plot(t, V1, color="red")
+
+
+
+    plt.show()
 
 def main_CBRD_animation():
 
@@ -818,28 +863,45 @@ def main_CBRD_animation():
         "Nro": 400,
         "dts": 0.5,
 
-        "N" : 4500, }
+        "N" : 100, }
 
+    cluster_neuron_params = neuron_params.copy()
+    cluster_neuron_params["Iextmean"] = 2.2
+    cluster_neuron_params["Iextvarience"] = 1.5
+    cluster_neuron_params["fi"] = 5
+    cluster_neuron_params["gbarKS"] = 12
+    cluster_neuron_params["gbarH"] = 1.0
+    cluster_neuron_params["Eh"] = -40.0
+    cluster_neuron_params["El"] = -50.0
 
+    cluster_neuron_params["Vt"] = -51.5 # -43.835308
+    cluster_neuron_params["V_reset"] = 57.760025
+    cluster_neuron_params["n_reset"] = 0.65 # 0.37
+    cluster_neuron_params["p_reset"] = 0.028  # 0.100481
+
+    cluster_neuron_params["q_reset"] = 0.008 # 0.012506
+    cluster_neuron_params["H_reset"] = 0.008 # 0.008850
 
 
     dt = 0.1
     duration = 1500
 
-    # cbrd = FS_neuron_Th(neuron_params)
-    #
-    # neuron_params["is_use_CBRD"] = False
-    # monte_carlo = FS_neuron_Th(neuron_params)
+    cbrd = ClusterNeuron_Th(cluster_neuron_params) # FS_neuron_Th(neuron_params)
+
+    neuron_params["is_use_CBRD"] = False
+    monte_carlo = ClusterNeuron_Th(cluster_neuron_params)
     # # animator = Animator(cbrd, [0, 200, 0, duration, 0, 200], [0, 1, 0, 400, -85, -55])
     # # animator.run(dt, duration, 0)
     #
-    # cbrd.update(dt, duration)
-    # monte_carlo.update(dt, duration)
-    #
-    # plt.plot(cbrd.times, cbrd.firing, color="green", label='CBRD')
-    # plt.plot(monte_carlo.times, monte_carlo.firing, color="blue", label='Monte-Carlo')
-    # plt.legend()
-    # plt.show()
+    cbrd.update(dt, duration)
+    monte_carlo.update(dt, duration)
+
+    plt.subplot(211)
+    plt.plot(cbrd.times, cbrd.firing, color="green", label='CBRD')
+    plt.subplot(212)
+    plt.plot(monte_carlo.times, monte_carlo.firing, color="blue", label='Monte-Carlo')
+    plt.legend()
+    plt.show()
 
 
 
@@ -847,6 +909,6 @@ def main_CBRD_animation():
 
 
 if __name__ == "__main__":
-    # main_CBRD_animation()
-    main_opt()
+    main_CBRD_animation()
+    # main_opt()
 
