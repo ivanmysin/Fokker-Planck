@@ -285,8 +285,6 @@ class Synapse:
 
         return
 
-
-
 def ppv(self):
     tp = 1
     fp = 0

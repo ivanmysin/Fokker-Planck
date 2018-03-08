@@ -425,7 +425,7 @@ def main():
         "C" : 0.37,
         "Vreset" : -40,
         "Vt" : -62,
-        "Iext" : 0,#  0.35,
+        "Iext" : 0.35,
         "saveV": True,
         "refactory" : 7.5,
         "leak"  : {"E" : -61.22, "g" : 0.025 }, # 0.025

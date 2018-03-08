@@ -27,6 +27,7 @@ class CBRD:
         self.ro[-1] = 1 / self.dts
         self.ro_H_integral = 0
         self.ts = 0
+        self.max_roH_idx = 0
 
 
     def H_function(self, V, dVdt, tau_m, Vt, sigma):
@@ -54,8 +55,10 @@ class CBRD:
         H = self.H_function(self.V, dVdt, tau_m, self.Vt, self.sigma)
         dro = self.ro * (1 - np.exp(-H * dt))  # dt * self.ro * H  #
         dro[:self.ref_idx] = 0
+
         self.ro -= dro
         self.ro[self.ro < 0] = 0
+        self.max_roH_idx = np.argmax(dro)
         self.ro_H_integral += np.sum(dro)
         self.ts += dt
 
@@ -518,6 +521,328 @@ class ClusterNeuron_Th(ClusterNeuron):
         else:
             return [], [], self.times, self.firing, [], []
 
+##################################################################
+class Channel:
+    def __init__(self, gmax, E, V, x=None, y=None, x_reset=None, y_reset=None):
+        self.gmax = gmax
+        self.E = E
+        self.g = 0
+        if not x is None:
+            self.x = self.get_x_inf(V)
+            self.x_reset = x_reset
+        else:
+            self.x = None
+
+        if not y is None:
+            self.y = self.get_y_inf(V)
+            self.y_reset = y_reset
+        else:
+            self.y = None
+
+    def update(self, dt, V):
+        self.g = self.gmax
+        if not (self.x is None):
+            x_inf = self.get_x_inf(V)
+            tau_x = self.get_tau_x(V)
+            self.x = x_inf - (x_inf - self.x) * np.exp(-dt / tau_x)
+            self.g *= self.x
+
+        if not (self.y is None):
+            y_inf = self.get_y_inf(V)
+            tau_y = self.get_tau_y(V)
+            self.y = y_inf - (y_inf - self.y) * np.exp(-dt / tau_y)
+            self.g *= self.y
+
+    def get_I(self, V):
+        I = self.g * (V - self.E)
+        return I
+
+    def get_g(self):
+        return self.g
+
+    def reset(self, spiking):
+        if not (self.x is None):
+            self.x[spiking] = self.x_reset
+
+        if not (self.y is None):
+            self.y[spiking] = self.y_reset
+
+    def get_x_inf(self, V):
+        return 0
+
+    def get_y_inf(self, V):
+        return 0
+
+    def get_tau_x(self, V):
+        return 0
+
+    def get_tau_y(self, V):
+        return 0
+
+    def roll(self, max_roH_idx):
+        if not (self.x is None):
+            tmpx = self.x[max_roH_idx]
+            self.x[:-1] = np.roll(self.x[:-1], 1)
+            self.x[0] = tmpx
+
+        if not (self.y is None):
+            tmpy = self.y[max_roH_idx]
+            self.y[:-1] = np.roll(self.y[:-1], 1)
+            self.y[0] = tmpy
+
+class KDR_Channel(Channel):
+
+    def get_a(self, V):
+        a = 0.17 * np.exp((V + 5) * 0.09)
+        return a
+
+    def get_b(self, V):
+        b  = 0.17 * np.exp(-(V + 5) * 0.022)
+        return b
+
+    def get_tau_x(self, V):
+        a = self.get_a(V)
+        b = self.get_b(V)
+
+        tau_x = 1 / (a + b) + 0.8
+
+        return tau_x
+
+    def get_x_inf(self, V):
+        a = self.get_a(V)
+        b = self.get_b(V)
+        x_inf = a / (a + b)
+        return x_inf
+
+    def get_tau_y(self, V):
+        return 300
+
+    def get_y_inf(self, V):
+        y_inf = 1 / (1 + np.exp((V + 68) * 0.038) )
+        return y_inf
+
+class A_channel(Channel):
+
+    def get_ax(self, V):
+        a = 0.08 * np.exp((V+41)*0.089)
+        return a
+
+    def get_bx(self, V):
+        b = 0.08 * np.exp(-(V+41)*0.016)
+        return b
+
+    def get_ay(self, V):
+        a = 0.04*np.exp(-(V+49)*0.11)
+        return a
+
+    def get_by(self, V):
+        b = 0.04
+        return b
+
+    def get_tau_x(self, V):
+        a = self.get_ax(V)
+        b = self.get_bx(V)
+        tau_x = 1 / (a + b) + 1
+        return tau_x
+
+    def get_x_inf(self, V):
+        a = self.get_ax(V)
+        b = self.get_bx(V)
+        x_inf = a / (a + b)
+        return x_inf
+
+    def get_tau_y(self, V):
+        a = self.get_ay(V)
+        b = self.get_by(V)
+        tau_y = 1 / (a + b) + 2
+        return tau_y
+
+    def get_y_inf(self, V):
+        a = self.get_ay(V)
+        b = self.get_by(V)
+        y_inf = a  / (a + b)
+        return y_inf
+
+    def update(self, dt, V):
+        self.g = self.gmax
+        if not (self.x is None):
+            x_inf = self.get_x_inf(V)
+            tau_x = self.get_tau_x(V)
+            self.x = x_inf - (x_inf - self.x) * np.exp(-dt / tau_x)
+            self.g *= self.x**4
+
+        if not (self.y is None):
+            y_inf = self.get_y_inf(V)
+            tau_y = self.get_tau_y(V)
+            self.y = y_inf - (y_inf - self.y) * np.exp(-dt / tau_y)
+            self.g *= self.y**3
+
+class M_channel(Channel):
+
+    def reset(self, spiking):
+        self.x[spiking] += self.x_reset * (1 - self.x[spiking])
+
+    def get_a(self, V):
+        a = 0.003 * np.exp( (V+45) * 0.135 )
+        return a
+
+    def get_b(self, V):
+        b = 0.003 * np.exp(-(V+45)*0.09)
+        return b
+
+    def get_x_inf(self, V):
+        a = self.get_a(V)
+        b = self.get_b(V)
+        x_inf = a / (a + b)
+        return x_inf
+
+    def get_tau_x(self, V):
+        a = self.get_a(V)
+        b = self.get_b(V)
+        tau_x = 1 / (a + b) + 8
+        return tau_x
+
+    def update(self, dt, V):
+        x_inf = self.get_x_inf(V)
+        tau_x = self.get_tau_x(V)
+        self.x = x_inf - (x_inf - self.x) * np.exp(-dt / tau_x)
+        self.g = self.gmax * self.x**2
+
+class AHP_Channel(Channel):
+
+    def get_tau_x(self, V):
+        tau_x = 2000 / (3.3 * np.exp( (V + 35)/20 ) + np.exp(-(V + 35)/20) )
+        return tau_x
+
+    def get_x_inf(self, V):
+        x_inf = 1 / (1 + np.exp(-(V + 35)/10))
+        return x_inf
+
+    def reset(self, spiking):
+        self.x[spiking] += self.x_reset * (1 - self.x[spiking])
+
+    def update(self, dt, V):
+        x_inf = self.get_x_inf(V)
+        tau_x = self.get_tau_x(V)
+        self.x = x_inf - (x_inf - self.x) * np.exp(-dt / tau_x)
+        self.g = self.gmax * self.x
+
+class HCN_Channel(Channel):
+
+    def get_tau_y(self, V):
+        return 180
+
+    def get_y_inf(self, V):
+        y_inf = 1.0 / (1 + np.exp((V + 98) * 0.075) )
+        return y_inf
+
+    def update(self, dt, V):
+        y_inf = self.get_y_inf(V)
+        tau_y = self.get_tau_y(V)
+        self.y = y_inf - (y_inf - self.y) * np.exp(-dt / tau_y)
+        self.g = self.gmax * self.y
+
+
+class BorgGrahamNeuron(CBRD):
+    def __init__(self, params):
+
+        self.is_use_CBRD = params["is_use_CBRD"]
+
+        if self.is_use_CBRD:
+            self.V = np.zeros(params["Nro"], dtype=float) - 65
+        else:
+            self.V = np.zeros(params["N"], dtype=float) - 65
+
+
+
+        self.C = params["C"]
+        self.V_reset = params["Vreset"]
+        self.Vt = params["Vt"]
+        self.Iext = params["Iext"]
+        self.Iextvarience = params["Iextvarience"]
+        self.saveV = params["saveV"]
+        self.refactory = params["refactory"]
+
+        self.sigma = self.Iextvarience / np.sqrt(2)
+
+        self.firing = [0]
+        self.times = [0]
+
+        if self.is_use_CBRD:
+            CBRD.__init__(self, params["Nro"], params["dts"])
+            self.ref_idx = int(self.refactory / self.dts)
+        else:
+            self.ts = np.zeros_like(self.V) + 200
+
+        leak = Channel(params["leak"]["g"], params["leak"]["E"], self.V)
+        dr_current = KDR_Channel(params["dr_current"]["g"], params["dr_current"]["E"], self.V, 1, 1, params["dr_current"]["x_reset"], params["dr_current"]["y_reset"])
+        a_current = A_channel(params["a_current"]["g"],params["a_current"]["E"], self.V, 1, 1, params["a_current"]["x_reset"], params["a_current"]["y_reset"])
+        m_current = M_channel(params["m_current"]["g"], params["m_current"]["E"], self.V, 1, None, params["m_current"]["x_reset"], params["m_current"]["y_reset"])
+        ahp = AHP_Channel(params["ahp"]["g"], params["ahp"]["E"], self.V, 1, None, params["ahp"]["x_reset"], params["ahp"]["y_reset"])
+        hcn = HCN_Channel(params["hcn"]["g"], params["hcn"]["E"], self.V, None, 1, params["hcn"]["x_reset"], params["hcn"]["y_reset"])
+
+        self.channels = [leak, dr_current, a_current, m_current, ahp, hcn]
+
+        if  self.saveV:
+            self.Vhist = [self.V]
+
+    def update(self, dt, duration=None):
+
+        if (duration is None):
+            duration = dt
+
+        t = 0
+        while(t < duration):
+
+            g_tot = 0
+            I = 0
+            for ch in self.channels:
+                ch.update(dt, self.V)
+                I -= ch.get_I(self.V)
+                g_tot += ch.get_g()
+            I += self.Iext
+
+            if not self.is_use_CBRD:
+                I += np.random.normal(0, self.Iextvarience, self.V.size)
+
+            dVdt = I / self.C
+            self.V += dt * dVdt
+
+            if (self.is_use_CBRD):
+                self.tau_m = self.C / g_tot
+                shift = self.update_ro(dt, dVdt, self.tau_m)
+                if shift:
+                    self.V[:-1] = np.roll(self.V[:-1], 1)
+                    for ch in self.channels:
+                        ch.roll(self.max_roH_idx)
+                        ch.reset(0)
+
+            else:
+                spiking = np.logical_and( (self.V >= self.Vt), (self.ts > self.refactory) )
+                self.ts += dt
+                if np.sum(spiking) > 0:
+
+                    self.V[spiking] = self.V_reset
+                    self.ts[spiking] = 0
+                    for ch in self.channels:
+                        ch.reset(spiking)
+
+                if self.saveV:
+                    self.Vhist.append(self.V[0])
+
+            t += dt
+
+            self.times.append(self.times[-1] + dt)
+            if self.is_use_CBRD:
+                self.firing.append(1000 * self.ro[0])
+            else:
+                self.firing.append(1000 * np.mean(spiking) / dt)
+
+
+        if self.is_use_CBRD:
+            return self.t_states, self.ro, self.times, self.firing, self.t_states, self.V
+        else:
+            return [], [], self.times, self.firing, [], []
 
 
 ############
@@ -905,10 +1230,61 @@ def main_CBRD_animation():
 
 
 
+def  main_Graham_neuron():
 
+    neuron_params = {
+        "C" : 0.37,
+        "Vreset" : -40,
+        "Vt" : -60,
+        "Iext" : 0.5,
+        "saveV": False,
+        "refactory" : 7.5,
+
+        "Iextvarience" : 0.8,
+
+        "is_use_CBRD": True,
+
+        "Nro": 400,
+        "dts": 0.5,
+        "N": 1000,
+
+        "leak"  : {"E" : -61.22, "g" : 0.025 },
+        "dr_current" : {"E" : -70, "g" : 0.4, "x" : 1, "y" : 1, "x_reset" : 0.26, "y_reset" : 0.47},  # "g" : 0.76
+        "a_current": {"E": -70, "g": 2.3, "x": 1, "y": 1, "x_reset" : 0.74,  "y_reset" : 0.69}, # 2.3 "g": 4.36,
+        "m_current": {"E": -80, "g": 0.4, "x": 1, "y": None, "x_reset" : 0.18, "y_reset" : None }, # 0.4 "g": 0.76,
+        "ahp": {"E": -70, "g": 0.32, "x": 1, "y": None, "x_reset" : 0.018, "y_reset" : None}, # 0.32 "g": 0.6,
+        "hcn" : { "E": -17, "g": 0.003, "x": None, "y": 1, "x_reset" : None, "y_reset" : 0.002 }, #
+    }
+
+    dt = 0.1
+    duration = 500
+    cbrd = BorgGrahamNeuron(neuron_params)
+    cbrd.update(dt, duration)
+    # animator = Animator(cbrd, [0, 200, 0, duration, 0, 200], [0, 1, 0, 1000, 0, 20])
+    # animator.run(dt, duration, 0)
+
+    neuron_params["is_use_CBRD"] = False
+    monte_carlo = BorgGrahamNeuron(neuron_params)
+
+    monte_carlo.update(dt, duration)
+
+    mc_firing = np.asarray(monte_carlo.firing)
+    win = parzen(15)
+    win /= np.sum(win)
+    mc_firing = np.convolve(mc_firing, win, mode="same")
+
+    t = np.linspace(0, duration, len(cbrd.firing) )
+    plt.plot(t, cbrd.firing, color="green", label="CBRD", linewidth=4)
+    plt.plot(t, mc_firing, color="blue", label="Monte-Carlo")
+    plt.xlim(0, duration)
+    plt.ylim(0, 1000)
+    plt.legend()
+    plt.show()
 
 
 if __name__ == "__main__":
-    main_CBRD_animation()
+    # main_CBRD_animation()
     # main_opt()
+
+    main_Graham_neuron()
 
