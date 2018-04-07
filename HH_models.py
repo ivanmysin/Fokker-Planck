@@ -31,6 +31,7 @@ class CBRD:
 
 
     def H_function(self, V, dVdt, tau_m, Vt, sigma):
+
         T = (Vt - V) / sigma / np.sqrt(2)
         A = np.exp(0.0061 - 1.12 * T - 0.257 * T**2 - 0.072 * T**3 - 0.0117 * T**4)
         dT_dt = -1.0 / sigma / np.sqrt(2) * dVdt
@@ -715,7 +716,7 @@ class AHP_Channel(Channel):
         return tau_x
 
     def get_x_inf(self, V):
-        x_inf = 1 / (1 + np.exp(-(V + 35)/10))
+        x_inf = 1 / (1 + np.exp(-(V + 35)/10)) # x_inf = 1 / (1 + np.exp(-(V + 35) / 4))  #
         return x_inf
 
     def reset(self, spiking):
@@ -753,8 +754,6 @@ class BorgGrahamNeuron(CBRD):
         else:
             self.V = np.zeros(params["N"], dtype=float) - 65
 
-
-
         self.C = params["C"]
         self.V_reset = params["Vreset"]
         self.Vt = params["Vt"]
@@ -763,14 +762,13 @@ class BorgGrahamNeuron(CBRD):
         self.saveV = params["saveV"]
         self.refactory = params["refactory"]
 
-        self.sigma = self.Iextvarience / np.sqrt(2)
 
         self.firing = [0]
         self.times = [0]
 
         if self.is_use_CBRD:
             CBRD.__init__(self, params["Nro"], params["dts"])
-            self.ref_idx = int(self.refactory / self.dts)
+            self.ref_idx = int(self.refactory / self.dts) - 1
         else:
             self.ts = np.zeros_like(self.V) + 200
 
@@ -783,8 +781,11 @@ class BorgGrahamNeuron(CBRD):
 
         self.channels = [leak, dr_current, a_current, m_current, ahp, hcn]
 
+        self.tau_m = self.C / params["leak"]["g"]
+        self.sigma = self.Iextvarience / params["leak"]["g"] * np.sqrt( 0.5 / self.tau_m)
+
         if  self.saveV:
-            self.Vhist = [self.V]
+            self.Vhist = [self.V[0]]
 
     def update(self, dt, duration=None):
 
@@ -803,32 +804,35 @@ class BorgGrahamNeuron(CBRD):
             I += self.Iext
 
             if not self.is_use_CBRD:
-                I += np.random.normal(0, self.Iextvarience, self.V.size)
+                I += np.random.normal(0, self.Iextvarience, self.V.size) / np.sqrt(dt)
 
             dVdt = I / self.C
             self.V += dt * dVdt
 
+
             if (self.is_use_CBRD):
-                self.tau_m = self.C / g_tot
+                self.tau_m = 25.4 # self.C / g_tot  # 10.4 #
                 shift = self.update_ro(dt, dVdt, self.tau_m)
                 if shift:
                     self.V[:-1] = np.roll(self.V[:-1], 1)
+                    self.V[0] = self.V_reset
                     for ch in self.channels:
                         ch.roll(self.max_roH_idx)
                         ch.reset(0)
-
             else:
                 spiking = np.logical_and( (self.V >= self.Vt), (self.ts > self.refactory) )
                 self.ts += dt
                 if np.sum(spiking) > 0:
-
                     self.V[spiking] = self.V_reset
                     self.ts[spiking] = 0
                     for ch in self.channels:
                         ch.reset(spiking)
 
-                if self.saveV:
-                    self.Vhist.append(self.V[0])
+            if self.saveV:
+                if (self.is_use_CBRD):
+                    self.Vhist.append( np.sum(self.V * self.ro * self.dts) ) # np.mean(self.V)
+                else:
+                    self.Vhist.append( self.V[0] )
 
             t += dt
 
@@ -1233,14 +1237,13 @@ def main_CBRD_animation():
 def  main_Graham_neuron():
 
     neuron_params = {
-        "C" : 0.37,
+        "C" : 0.7, # mkF / cm^2
         "Vreset" : -40,
-        "Vt" : -60,
-        "Iext" : 0.5,
+        "Vt" : -55,
+        "Iext" : 0.9, # nA / cm^2
         "saveV": False,
-        "refactory" : 7.5,
-
-        "Iextvarience" : 0.8,
+        "refactory" : 2.5,
+        "Iextvarience" : 0.1,
 
         "is_use_CBRD": True,
 
@@ -1249,17 +1252,21 @@ def  main_Graham_neuron():
         "N": 1000,
 
         "leak"  : {"E" : -61.22, "g" : 0.025 },
-        "dr_current" : {"E" : -70, "g" : 0.4, "x" : 1, "y" : 1, "x_reset" : 0.26, "y_reset" : 0.47},  # "g" : 0.76
+        "dr_current" : {"E" : -70, "g" : 0.76, "x" : 1, "y" : 1, "x_reset" : 0.26, "y_reset" : 0.47},  # "g" : 0.76
         "a_current": {"E": -70, "g": 2.3, "x": 1, "y": 1, "x_reset" : 0.74,  "y_reset" : 0.69}, # 2.3 "g": 4.36,
         "m_current": {"E": -80, "g": 0.4, "x": 1, "y": None, "x_reset" : 0.18, "y_reset" : None }, # 0.4 "g": 0.76,
         "ahp": {"E": -70, "g": 0.32, "x": 1, "y": None, "x_reset" : 0.018, "y_reset" : None}, # 0.32 "g": 0.6,
-        "hcn" : { "E": -17, "g": 0.003, "x": None, "y": 1, "x_reset" : None, "y_reset" : 0.002 }, #
+        "hcn" : { "E": -17, "g": 0.003, "x": None, "y": 1, "x_reset" : None, "y_reset" : 0.002 }, # 0.003
     }
 
     dt = 0.1
     duration = 500
     cbrd = BorgGrahamNeuron(neuron_params)
+
+    # assert(False)
+
     cbrd.update(dt, duration)
+
     # animator = Animator(cbrd, [0, 200, 0, duration, 0, 200], [0, 1, 0, 1000, 0, 20])
     # animator.run(dt, duration, 0)
 
@@ -1274,11 +1281,33 @@ def  main_Graham_neuron():
     mc_firing = np.convolve(mc_firing, win, mode="same")
 
     t = np.linspace(0, duration, len(cbrd.firing) )
+    plt.figure()
     plt.plot(t, cbrd.firing, color="green", label="CBRD", linewidth=4)
     plt.plot(t, mc_firing, color="blue", label="Monte-Carlo")
     plt.xlim(0, duration)
     plt.ylim(0, 1000)
     plt.legend()
+
+    # plt.show(block=False)
+    # monte_carlo_V = np.asarray(monte_carlo.Vhist)
+    # t = np.linspace(0, duration, monte_carlo_V.size)
+    #
+    #
+    # plt.figure()
+    # plt.plot(t, monte_carlo_V, color="blue", label="Monte-Carlo")
+    # plt.plot(t, cbrd.Vhist, color="green", label="CBRD")
+    # plt.xlim(0, duration)
+    # plt.ylim(-90, 0)
+    # plt.legend()
+    #
+    #
+    # plt.figure()
+    # plt.plot(cbrd.V, color="green", label="CBRD")
+    # plt.xlim(0, 200)
+    # plt.ylim(-90, 0)
+    # plt.legend()
+
+
     plt.show()
 
 
