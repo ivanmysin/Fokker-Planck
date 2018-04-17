@@ -1,10 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
+import matplotlib.animation as animation
+
+# import FuncAnimation
 from scipy.special import erf
 from scipy.stats import pearsonr
 from scipy.signal import argrelextrema, parzen
-# from scipy.signal.parzen
+import HH_models as hh
 
 class CBRD:
 
@@ -172,7 +174,7 @@ class  SineGenerator(Neuron):
         self.amp_min = params["amp_min"]
         self.flow = 0
         self.t = 0
-        self.hist = []
+        self.hist = [self.flow]
 
         self.artifitial_generator = True
 
@@ -203,7 +205,7 @@ class PoissonGenerator:
         self.previos_t = params["refactory"] + 10
         self.start = self.length + 1
 
-        self.hist = []
+        self.hist = [self.flow]
         self.artifitial_generator = True
 
 
@@ -249,6 +251,8 @@ class Network:
             if not (neuron.artifitial_generator):
                 self.Nn += 1
 
+        self.sum_Isyn = []
+
     def update(self, dt, duration=None):
 
         if (duration is None):
@@ -261,15 +265,17 @@ class Network:
             sum_Pts = 0
             sum_flow = 0
 
+            # self.sum_Isyn.append(0)
             for neuron in self.neurons:
+                # self.sum_Isyn[-1] += neuron.Isyn
+
                 ts_states, Pts, times, flow  = neuron.update(dt)
 
                 if not (neuron.artifitial_generator):
                     sum_Pts += Pts
                     sum_flow += flow
 
-            sum_Pts /= self.Nn
-            sum_flow /= self.Nn
+            # print (sum_Isyn)
 
             for synapse in self.synapses:
                 synapse.update(dt)
@@ -281,17 +287,46 @@ class Network:
         for neuron in self.neurons:
             if (neuron.artifitial_generator):
                 generators_signal.append(np.asarray( neuron.hist) )
+        # np.linspace(0, len(self.sum_Isyn)*dt,len(self.sum_Isyn) ) , self.sum_Isyn,
+        return  ts_states, sum_Pts, times, sum_flow, generators_signal  #         return times, sum_flow, generators_signal  #
 
-        return ts_states, sum_Pts, times, sum_flow, generators_signal
 
     def getflow(self):
         flow = 0
         for neuron in self.neurons:
-            flow += np.asarray( neuron.firings )
 
-        flow /= len(self.neurons)
+
+            if not neuron.artifitial_generator:
+                flow += neuron.get_flow_hist()
+
+
+        # flow /= len(self.neurons)
 
         return flow
+
+    def getCV(self):
+        sumCV = 0
+
+        for neuron in self.neurons:
+            if not neuron.artifitial_generator:
+                sumCV += np.asarray( neuron.get_CV() )
+
+        # flow /= len(self.neurons)
+
+        return sumCV
+
+    def get_artificial_signals(self):
+        signals = []
+
+        for neuron in self.neurons:
+
+            if neuron.artifitial_generator:
+                signals.append(neuron.get_hist())
+
+        return signals
+
+
+
 
 class Synapse:
     def __init__(self, params):
@@ -300,11 +335,19 @@ class Synapse:
         self.pre = params["pre"]
         self.post = params["post"]
 
+
+        self.tau_s = 5.4
+        self.tau = 1.0
+        self.gbarS = 1
+        self.S = 0
+        self.dsdt = 0
+        # Erev, delay
+
         self.pre_hist = []
 
     def update(self, dt):
 
-        if (len(self.pre_hist) == 0)  and (self.delay > 0):
+        if (len(self.pre_hist) == 0) and (self.delay > 0):
 
             for _ in range(int(self.delay/dt)):
                 self.pre_hist.append(0)
@@ -315,16 +358,20 @@ class Synapse:
             self.pre_hist.append(pre_flow)
             pre_flow = self.pre_hist.pop(0)
 
-        self.post.add_Isyn(pre_flow * self.w)
+        self.dsdt = self.dsdt + dt * (self.tau * self.gbarS * pre_flow - self.S / self.tau_s**2 - 2 * self.dsdt / self.tau_s)
+        self.S = self.S + dt * self.dsdt
+
+        Isyn = self.S * self.gbarS * self.w
+        self.post.add_Isyn(Isyn)
 
         return
 
 ############################################
 
 class Animator:
-    def __init__(self, model, xlim, ylim):
+    def __init__(self, model, xlim, ylim, path=None):
 
-        self.Fig, self.ax = plt.subplots(nrows=2, ncols=1)
+        self.Fig, self.ax = plt.subplots(nrows=3, ncols=1)
         self.line1, = self.ax[0].plot([], [], 'b', animated=True)
         self.time_text = self.ax[0].text(0.05, 0.9, '', transform=self.ax[0].transAxes)
 
@@ -338,37 +385,49 @@ class Animator:
         self.ax[1].set_ylim(ylim[2], ylim[3])
 
 
-        # self.line3, = self.ax[2].plot([], [], 'b', animated=True)
-        #
-        # self.ax[2].set_xlim(xlim[4], xlim[5])
-        # self.ax[2].set_ylim(ylim[4], ylim[5])
+        self.line3, = self.ax[2].plot([], [], 'b', animated=True)
+        self.ax[2].set_xlim(xlim[4], xlim[5])
+        self.ax[2].set_ylim(ylim[4], ylim[5])
 
 
         self.model = model
+        self.path=path
 
 
     def update_on_plot(self, idx):
 
-        x1, y1, x2, y2 = self.model.update(self.dt)
+        x1, y1, x2, y2, _ = self.model.update(self.dt)
 
+        y3 = generators_signal = self.model.get_artificial_signals()
 
         self.line1.set_data(x1, y1)
         self.time_text.set_text("simulation time is %.2f in ms" % idx)
 
         self.line2.set_data(x2, y2)
 
-       # self.line3.set_data(x3, y3)
+        self.line3.set_data(x2, y3)
 
-        return [self.line1, self.time_text, self.line2] # , self.line3
+        return [self.line1, self.time_text, self.line2, self.line3]
 
 
     def run(self, dt, duration, interval=10):
 
         self.dt = dt
         self.duration = duration
-        ani = FuncAnimation(self.Fig, self.update_on_plot, frames=np.arange(0, self.duration, self.dt), interval=interval, blit=True, repeat=False)
+        if interval==0:
+            interval = 1
+        ani = animation.FuncAnimation(self.Fig, self.update_on_plot, frames=np.arange(0, self.duration, self.dt), interval=interval, blit=True, repeat=False)
 
-        plt.show()
+        # plt.show(block=False)
+
+        if not (self.path is None):
+            mywriter = animation.FFMpegWriter(fps=100)
+            ani.save(self.path+".mp4", writer=mywriter)
+
+        plt.close(self.Fig)
+
+
+
 
 
 
@@ -392,6 +451,8 @@ def run_simulation(Nn=15, std_of_Vt=3.0, iext=12, ntimesinputs=0, nspatialinputs
         "Nro" : 400,
         "dts" : 0.5,
         "tau_t" : 0,
+
+        "w_in_distr" : 1.0,
     }
 
     sine_generator_params = {
@@ -529,32 +590,32 @@ def answer_2_inputs():
     plt.show(block=False)
 
 
-    # std_vt_arr = np.linspace(0, 12, 2) # 24
-    # flow_time_arr = []
-    # corr_arr = []
-    # for stdvt in std_vt_arr:
-    #     flow_time, generators_signal = run_simulation(std_of_Vt=stdvt, iext=iext, nspatialinputs=0, ntimesinputs=1)
-    #     t = np.linspace(0, 900, flow_time.size)
-    #     generators_signal = generators_signal[0]
-    #
-    #     flow_time_arr.append(flow_time)
-    #     R, p = pearsonr(flow_time, generators_signal)
-    #     corr_arr.append(R)
-    #
-    #
-    #     fig, axs = plt.subplots(nrows=1, ncols=1)
-    #     sine = generators_signal * np.std(flow_time) + np.mean(flow_time)
-    #     axs.plot(t, sine, color="blue")
-    #     axs.plot(t, flow_time, color="red" )
-    #     plt.show(block=False)
-    #
-    #
-    # flow_time_arr = np.asarray(flow_time_arr)
-    # np.save("time_input", flow_time_arr)
-    #
-    # fig, axs = plt.subplots(nrows=1, ncols=1)
-    # axs.plot(std_vt_arr, corr_arr)
-    # axs.set_title("I/O correlation")
+    std_vt_arr = np.linspace(0, 12, 2) # 24
+    flow_time_arr = []
+    corr_arr = []
+    for stdvt in std_vt_arr:
+        flow_time, generators_signal = run_simulation(std_of_Vt=stdvt, iext=iext, nspatialinputs=0, ntimesinputs=1)
+        t = np.linspace(0, 900, flow_time.size)
+        generators_signal = generators_signal[0]
+
+        flow_time_arr.append(flow_time)
+        R, p = pearsonr(flow_time, generators_signal)
+        corr_arr.append(R)
+
+
+        fig, axs = plt.subplots(nrows=1, ncols=1)
+        sine = generators_signal * np.std(flow_time) + np.mean(flow_time)
+        axs.plot(t, sine, color="blue")
+        axs.plot(t, flow_time, color="red" )
+        plt.show(block=False)
+
+
+    flow_time_arr = np.asarray(flow_time_arr)
+    np.save("time_input", flow_time_arr)
+
+    fig, axs = plt.subplots(nrows=1, ncols=1)
+    axs.plot(std_vt_arr, corr_arr)
+    axs.set_title("I/O correlation")
     plt.show()
 
 def calculate_ppv(input, output):
@@ -574,42 +635,290 @@ def calculate_ppv(input, output):
 
     return ppv
 
+def run_HH(Nn=10, std_of_iext=0.2, iext=0.5, ntimesinputs=0, nspatialinputs=0, fp=10, fs=8, path=None):
+
+
+    if (std_of_iext == 0):
+        Nn = 1
+
+    neuron_params = {
+        "C" : 0.7, # mkF / cm^2
+        "Vreset" : -40,
+        "Vt" : -55,
+        "Iext" : iext, # 0.3, # nA / cm^2
+        "saveV": False,
+        "refactory" : 4.5,
+        "Iextvarience" : 0.5,
+
+        "is_use_CBRD": True,
+
+        "w_in_distr" : 1.0,
+        "saveCV" : True,
+
+        "Nro": 400,
+        "dts": 0.5,
+        "N": 1500,
+
+        "leak"  : {"E" : -61.22, "g" : 0.025 },
+        "dr_current" : {"E" : -70, "g" : 0.76, "x" : 1, "y" : 1, "x_reset" : 0.26, "y_reset" : 0.47},  # "g" : 0.76
+        "a_current": {"E": -70, "g": 2.3, "x": 1, "y": 1, "x_reset" : 0.74,  "y_reset" : 0.69}, # 2.3 "g": 4.36,
+        "m_current": {"E": -80, "g": 0.4, "x": 1, "y": None, "x_reset" : 0.18, "y_reset" : None }, # 0.4 "g": 0.76,
+        "ahp": {"E": -70, "g": 0.32, "x": 1, "y": None, "x_reset" : 0.018, "y_reset" : None}, # 0.32 "g": 0.6,
+        "hcn" : { "E": -17, "g": 0.003, "x": None, "y": 1, "x_reset" : None, "y_reset" : 0.002 }, # 0.003
+    }
+
+
+    sine_generator_params = {
+        "fr" : fs,
+        "phase" : 0,
+        "amp_max" : 0.025 * Nn,
+        "amp_min" : 0,
+    }
+
+    poisson_generator_params = {
+        "fr" : fp,
+        "w" : 0.05 * Nn,
+        "refactory" : 10,
+        "length" : 5,
+    }
+
+    synapse_params = {
+        "w" : 100.0, # 1000,  # 20.0,
+        "delay" : 2,
+        "pre" : 0,
+        "post" : 0,
+    }
+
+    dt = 0.1
+    duration = 500
+
+    neurons = []
+    synapses = []
+    synapse_params["w"] /= Nn**2
+
+    for _ in range(ntimesinputs):
+        neuron = SineGenerator(sine_generator_params)
+        neurons.append(neuron)
+
+    for _ in range(nspatialinputs):
+        neuron = PoissonGenerator(poisson_generator_params)
+        neurons.append(neuron)
+
+    if std_of_iext != 0:
+        iext_min = neuron_params["Iext"] - 3 * std_of_iext
+        iext_max = neuron_params["Iext"] + 3 * std_of_iext
+        iext_arr = np.linspace( iext_min, iext_max, Nn )
+        i_ext_int = (iext_max - iext_min) / Nn
+        p = 1 / (std_of_iext * np.sqrt(2 * np.pi) ) * np.exp( -(neuron_params["Iext"] - iext_arr)**2 / (2 * std_of_iext**2 ) )
+        p = p * i_ext_int
+
+
+    for idx in range(Nn):
+        neuron_params_tmp = neuron_params.copy()
+
+        if Nn > 1:
+            neuron_params_tmp["Iext"] = iext_arr[idx]
+            neuron_params_tmp["w_in_distr"] = p[idx] # 1.0 / Nn #
+
+        neuron = hh.BorgGrahamNeuron(neuron_params_tmp)
+        neurons.append(neuron)
+
+
+
+
+    for pre_idx in range(ntimesinputs):
+        for post_idx in range(ntimesinputs+nspatialinputs, Nn+ntimesinputs+nspatialinputs):
+            synapse_params_tmp = synapse_params.copy()
+            synapse_params_tmp["pre"] = neurons[pre_idx]
+            synapse_params_tmp["post"] = neurons[post_idx]
+            synapse = Synapse(synapse_params_tmp)
+            synapses.append(synapse)
+
+    for pre_idx in range(ntimesinputs):
+        for post_idx in range(ntimesinputs + nspatialinputs, Nn + ntimesinputs + nspatialinputs):
+            synapse_params_tmp = synapse_params.copy()
+            synapse_params_tmp["pre"] = neurons[pre_idx]
+            synapse_params_tmp["post"] = neurons[post_idx]
+            synapse = Synapse(synapse_params_tmp)
+            synapses.append(synapse)
+    # set all to all connections !!!!!
+    # w_sum = 0
+    for pre_idx in range(ntimesinputs, Nn+ntimesinputs+nspatialinputs):
+        for post_idx in range(ntimesinputs+nspatialinputs, Nn+ntimesinputs+nspatialinputs):
+            synapse_params_tmp = synapse_params.copy()
+            synapse_params_tmp["pre"] = neurons[pre_idx]
+            synapse_params_tmp["post"] = neurons[post_idx]
+            synapse = Synapse(synapse_params_tmp)
+            synapses.append(synapse)
+
+
+    #w_sum += synapse_params_tmp["w"] / Nn
+    # print(w_sum)
+    # assert (False)
+
+    net = Network(neurons, synapses)
+    animator = Animator(net, [0, 200, 0, duration, 0, duration], [0, 1, 0, 1000, 0, 0.2], path=path)
+    animator.run(dt, duration, 0)
+
+    flow = net.getflow()
+    cv = net.getCV()
+    generators_signal = net.get_artificial_signals()
+
+
+    return flow, generators_signal, cv
+    # flow = net.getflow()
+
+    # ts_states, sum_Pts, times, flow, generators_signal = net.update(dt, duration)
+    # return flow, generators_signal
+
+
+
+def synchronization_regimes_HH():
+    std_of_iext_arr = np.linspace(0, 3, 5) # 10
+    flow_arr = []
+
+    synchs_arr = []
+
+    for iext_std in std_of_iext_arr:
+
+        flow, _ = run_HH(Nn=15, std_of_iext=iext_std, iext=0.8)
+        flow_arr.append(flow)
+        synch_coeff = np.std(flow[-1000:])
+
+        synchs_arr.append(synch_coeff)
+
+
+
+    fig, axs = plt.subplots(nrows=1, ncols=1)
+
+    axs.plot(std_of_iext_arr, synchs_arr)
+
+    plt.show()
+
+
+def answer_2_spacial_inputs_HH(path):
+
+    std_iext_arr = np.linspace(0, 1, 5)  # 10
+    iext = 0.5
+    fp_arr = np.linspace(2, 15, 10) # np.linspace(50, 70, 3) #
+    ppv_arr = []
+    max_ppv_arr = []
+
+    # win = parzen(15)
+
+    fig, axs = plt.subplots(nrows=1, ncols=2)
+
+    for fp in fp_arr:
+        for stext in std_iext_arr:
+            path_tmp = path + '{:.2f}'.format(stext) + "_" + '{:.2f}'.format(fp)
+            print(path_tmp)
+            flow_spatial, generators_signal, cv = run_HH(Nn=10, std_of_iext=stext, iext=iext, nspatialinputs=1, fp=fp, path=path_tmp)
+            generators_signal = generators_signal[0]
+
+
+            # flow_spatial = np.convolve(flow_spatial, win, mode="same")
+
+            answs_idx = argrelextrema(flow_spatial, np.greater, order=150)[0]
+            input_idx = np.argwhere(np.diff(generators_signal) < 0)
+            # answs_idx = answs_idx[flow_spatial[answs_idx] > np.percentile(flow_spatial, 80)]
+
+            ppv = calculate_ppv(input_idx, answs_idx)
+            ppv_arr.append(ppv)
+
+
+            np.savez(path_tmp, flow=flow_spatial, artsignal=generators_signal, cv=cv)
+
+        ppv_arr = np.asarray(ppv_arr)
+        max_ppv_arr.append(np.max(ppv_arr))
+        axs[0].plot(std_iext_arr, ppv_arr, label='{:.2f}'.format(fp))
+
+        ppv_arr = []
+
+    axs[0].set_ylabel("PPV")
+    axs[0].set_xlabel("Std of Iext")
+    axs[0].legend()
+
+
+    axs[1].plot(fp_arr, max_ppv_arr)
+    axs[1].set_ylabel("PPV*")
+    axs[1].set_xlabel("Fp")
+
+
+    path_tmp = path + "ppv_from_iext_std"
+    fig.savefig(path_tmp)
+    plt.close(fig)
+
+
+def answer_2_time_inputs_HH(path):
+    std_iext_arr = np.linspace(0, 1, 5)  # 10
+    iext = 0.5
+    fs_arr = np.logspace(0.1, 2, 10, endpoint=False)
+
+    corr_arr = []
+    max_corr_fs_arr = []
+
+
+    fig, axs = plt.subplots(nrows=1, ncols=2)
+
+    for fs in fs_arr:
+        for stext in std_iext_arr:
+            path_tmp = path + '{:.2f}'.format(stext) + "_" + '{:.2f}'.format(fs)
+            print(path_tmp)
+
+            flow_time, generators_signal, cv = run_HH(Nn=10, std_of_iext=stext, iext=iext, ntimesinputs=1, fs=fs,
+                                                        path=path_tmp)
+
+            generators_signal = generators_signal[0]
+
+
+
+            R, p = pearsonr(flow_time, generators_signal)
+            corr_arr.append(R)
+
+
+
+            np.savez(path_tmp, flow=flow_time, artsignal=generators_signal, cv=cv)
+
+        corr_arr = np.asarray(corr_arr)
+        max_corr_fs_arr.append(fs_arr[ np.argmax(corr_arr) ] )
+
+
+        axs[0].plot(std_iext_arr, corr_arr, label='{:.2f}'.format(fs))
+
+        corr_arr = []
+
+    axs[0].set_ylabel("I/O correlation")
+    axs[0].set_xlabel("Std of Iext")
+    axs[0].legend()
+
+    axs[1].plot(fs_arr, max_corr_fs_arr)
+    axs[1].set_ylabel("Std of Iext *")
+    axs[1].set_xlabel("Fs")
+
+    path_tmp = path + "IO_corralation_from_iext_std"
+    fig.savefig(path_tmp)
+    plt.close(fig)
+
+
+
 
 def main():
     # synchronization_regimes()
-    answer_2_inputs()
+    # answer_2_inputs()
+
+    # synchronization_regimes_HH()
+    # path = "/home/ivan/Data/CBRD/poisson_input/"
+    # answer_2_spacial_inputs_HH(path)
+
+    path = "/home/ivan/Data/CBRD/sine_input/"
+    answer_2_time_inputs_HH(path)
+
+    # run_HH(Nn=10, std_of_iext=0.8, iext=0.5, ntimesinputs=0, nspatialinputs=0, path=path+"1.mp4")
+
+
 
 
 if __name__ == "__main__":
     main()
-
-    # t = np.linspace(0, 1, 100)
-    #
-    # input = np.zeros(100)
-    # output = np.zeros(100)
-    #
-    # input[0::10] = 1
-    # input[1::10] = 1
-    # input[2::10] = 1
-    # input[3::10] = 1
-    #
-    # output[2::10] = 1
-    #
-    # answs_idx = argrelextrema(output, np.greater, order=4)[0]
-    # input_idx = np.argwhere( np.diff(input) < 0 )
-    #
-    #
-    #
-    # print(tp, fp)
-    #
-    # plt.plot(t, input)
-    # plt.plot(t, output)
-    #
-    # plt.scatter(t[input_idx], input[input_idx] + 0.0001 )
-    #
-    #
-    #
-    # plt.show()
-
 
 

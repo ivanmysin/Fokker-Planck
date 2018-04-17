@@ -54,13 +54,27 @@ class CBRD:
             # self.ro /= np.sum(self.ro) * self.dts
             # print (np.sum(self.ro) * self.dts)
         H = self.H_function(self.V, dVdt, tau_m, self.Vt, self.sigma)
+        H[:self.ref_idx] = 0
         dro = self.ro * (1 - np.exp(-H * dt))  # dt * self.ro * H  #
-        dro[:self.ref_idx] = 0
-
         self.ro -= dro
         self.ro[self.ro < 0] = 0
         self.max_roH_idx = np.argmax(dro)
-        self.ro_H_integral += np.sum(dro)
+        sum_dro = np.sum(dro)
+        self.ro_H_integral += sum_dro
+
+        if self.saveCV:
+            roH = self.ro * H * self.dts
+            isi_mean_of2 = np.sum(self.t_states ** 2 * roH) * np.sum(roH)
+            isi_mean = (np.sum(self.t_states * roH))**2  # / sum_roH])**2
+
+            if isi_mean < isi_mean_of2 and isi_mean_of2 > 0:
+                CV = np.sqrt(isi_mean_of2 / isi_mean - 1)
+            else:
+                CV = 0
+            # print (CV)
+            self.CVhist.append(CV)
+
+
         self.ts += dt
 
         return shift
@@ -760,9 +774,11 @@ class BorgGrahamNeuron(CBRD):
         self.Iext = params["Iext"]
         self.Iextvarience = params["Iextvarience"]
         self.saveV = params["saveV"]
+        self.saveCV = params["saveCV"]
         self.refactory = params["refactory"]
 
-
+        self.w_in_distr = params["w_in_distr"]
+        self.artifitial_generator = False
         self.firing = [0]
         self.times = [0]
 
@@ -781,11 +797,17 @@ class BorgGrahamNeuron(CBRD):
 
         self.channels = [leak, dr_current, a_current, m_current, ahp, hcn]
 
+        self.Isyn = 0
+
         self.tau_m = self.C / params["leak"]["g"]
         self.sigma = self.Iextvarience / params["leak"]["g"] * np.sqrt( 0.5 / self.tau_m)
 
         if  self.saveV:
             self.Vhist = [self.V[0]]
+
+        if self.saveCV:
+            self.CVhist = [0]
+
 
     def update(self, dt, duration=None):
 
@@ -801,7 +823,10 @@ class BorgGrahamNeuron(CBRD):
                 ch.update(dt, self.V)
                 I -= ch.get_I(self.V)
                 g_tot += ch.get_g()
+
+            # print(self.V)
             I += self.Iext
+            I += self.Isyn
 
             if not self.is_use_CBRD:
                 I += np.random.normal(0, self.Iextvarience, self.V.size) / np.sqrt(dt)
@@ -809,9 +834,10 @@ class BorgGrahamNeuron(CBRD):
             dVdt = I / self.C
             self.V += dt * dVdt
 
+            self.Isyn = 0
 
             if (self.is_use_CBRD):
-                self.tau_m = 25.4 # self.C / g_tot  # 10.4 #
+                self.tau_m = self.C / g_tot  # 10.4 # 25.4 #
                 shift = self.update_ro(dt, dVdt, self.tau_m)
                 if shift:
                     self.V[:-1] = np.roll(self.V[:-1], 1)
@@ -838,15 +864,30 @@ class BorgGrahamNeuron(CBRD):
 
             self.times.append(self.times[-1] + dt)
             if self.is_use_CBRD:
-                self.firing.append(1000 * self.ro[0])
+                self.firing.append(1000 * self.w_in_distr * self.ro[0])
             else:
-                self.firing.append(1000 * np.mean(spiking) / dt)
+                self.firing.append(1000 * self.w_in_distr * np.mean(spiking) / dt)
 
 
         if self.is_use_CBRD:
-            return self.t_states, self.ro, self.times, self.firing, self.t_states, self.V
+            return self.t_states, self.w_in_distr * self.ro, self.times, np.asarray(self.firing) #, self.t_states, self.V
         else:
-            return [], [], self.times, self.firing, [], []
+            return [], [], self.times, np.asarray(self.firing) # , [], []
+
+    def get_flow(self):
+        if self.is_use_CBRD:
+            return self.w_in_distr  * self.ro[0]
+        else:
+            return self.w_in_distr * self.firing[-1] * 0.001
+
+    def get_flow_hist(self):
+        return self.w_in_distr * np.asarray(self.firing)
+
+    def add_Isyn(self, Isyn):
+        self.Isyn += Isyn
+
+    def get_CV(self):
+        return self.w_in_distr * np.asarray(self.CVhist)
 
 
 ############
@@ -1240,7 +1281,7 @@ def  main_Graham_neuron():
         "C" : 0.7, # mkF / cm^2
         "Vreset" : -40,
         "Vt" : -55,
-        "Iext" : 0.9, # nA / cm^2
+        "Iext" : 0.3, # nA / cm^2
         "saveV": False,
         "refactory" : 2.5,
         "Iextvarience" : 0.1,
@@ -1249,7 +1290,7 @@ def  main_Graham_neuron():
 
         "Nro": 400,
         "dts": 0.5,
-        "N": 1000,
+        "N": 1500,
 
         "leak"  : {"E" : -61.22, "g" : 0.025 },
         "dr_current" : {"E" : -70, "g" : 0.76, "x" : 1, "y" : 1, "x_reset" : 0.26, "y_reset" : 0.47},  # "g" : 0.76
@@ -1270,13 +1311,14 @@ def  main_Graham_neuron():
     # animator = Animator(cbrd, [0, 200, 0, duration, 0, 200], [0, 1, 0, 1000, 0, 20])
     # animator.run(dt, duration, 0)
 
+    # neuron_params["is_use_CBRD"] = False
     neuron_params["is_use_CBRD"] = False
     monte_carlo = BorgGrahamNeuron(neuron_params)
 
     monte_carlo.update(dt, duration)
 
     mc_firing = np.asarray(monte_carlo.firing)
-    win = parzen(15)
+    win = np.ones(10)  # parzen(15)
     win /= np.sum(win)
     mc_firing = np.convolve(mc_firing, win, mode="same")
 
