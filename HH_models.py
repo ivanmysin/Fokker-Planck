@@ -824,7 +824,6 @@ class BorgGrahamNeuron(CBRD):
                 I -= ch.get_I(self.V)
                 g_tot += ch.get_g()
 
-            # print(self.V)
             I += self.Iext
             I += self.Isyn
 
@@ -1233,7 +1232,11 @@ def main_CBRD_animation():
         "Nro": 400,
         "dts": 0.5,
 
-        "N" : 100, }
+        "N" : 100,
+
+        "w_in_distr" : 1.0,
+
+    }
 
     cluster_neuron_params = neuron_params.copy()
     cluster_neuron_params["Iextmean"] = 2.2
@@ -1278,15 +1281,18 @@ def main_CBRD_animation():
 def  main_Graham_neuron():
 
     neuron_params = {
-        "C" : 0.7, # mkF / cm^2
+        "C" : 0.3, # mkF / cm^2
         "Vreset" : -40,
         "Vt" : -55,
-        "Iext" : 0.3, # nA / cm^2
+        "Iext" : 0.9, # nA / cm^2
         "saveV": False,
+        "saveCV" : False,
         "refactory" : 2.5,
         "Iextvarience" : 0.1,
 
         "is_use_CBRD": True,
+
+        "w_in_distr": 1.0,
 
         "Nro": 400,
         "dts": 0.5,
