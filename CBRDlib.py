@@ -11,6 +11,7 @@ class BaseNeuron:
 
         self.Vreset = params["Vreset"]
         self.Vt = params["Vt"]
+
         self.gl = params["gl"]
         self.El = params["El"]
         self.C = params["C"]
@@ -29,17 +30,17 @@ class BaseNeuron:
         self.N = params["N"]
 
         self.V = np.zeros(self.N)
-
+        self.dts = params["dts"]
 
         if self.is_use_CBRD:
-            self.dts = params["dts"]
+
             self.t_states = np.linspace(0, self.N * self.dts, self.N)
             self.ro = np.zeros_like(self.t_states)
             self.ro[-1] = 1 / self.dts
             self.ro_H_integral = 0
             self.ts = 0
 
-            self.sigma = self.sigma / self.gl * np.sqrt( 0.5 * self.gl / self.C) # self.sigma / SQRT_FROM_2
+
 
             self.ref_idx = int(self.refactory / self.dts)
             self.ref_dvdt_idx = int(self.ref_dvdt / self.dts)
@@ -49,9 +50,7 @@ class BaseNeuron:
         else:
             self.ts = np.zeros_like(self.V) + 200
 
-
         self.firing = [0]
-
         self.CVhist = [0]
         self.saveCV = True
 
@@ -64,7 +63,6 @@ class BaseNeuron:
         dT_dt[dT_dt > 0] = 0
         F_T = SQRT_FROM_2_PI * np.exp(-T**2) / (1.000000001 + erf(T))
         B = -SQRT_FROM_2 * dT_dt * F_T * tau_m
-
         H = (A + B) / tau_m
         return H
 
@@ -85,16 +83,17 @@ class BaseNeuron:
 
 
         H = self.H_function(self.V, dVdt, tau_m, self.Vt, self.sigma)
+
         H[:self.ref_idx] = 0
         dro = self.ro * (1 - np.exp(-H * dt))  # dt * self.ro * H  #
         self.max_roH_idx = np.argmax(dro)
         self.ro -= dro
 
-        self.ro[self.ro < 0] = 0
-
-
+        # self.ro[self.ro < 0] = 0
         self.ro_H_integral += np.sum(dro)
         self.ts += dt
+
+        # print(self.ro)
 
         # if self.saveCV and shift:
         #     roH = self.ro * H * self.dts
@@ -134,6 +133,18 @@ class BaseNeuron:
     def get_CV(self):
         return self.w_in_distr * np.asarray(self.CVhist)
 
+    def getV(self):
+        return self.V
+
+    def get_weights(self):
+
+        if self.is_use_CBRD:
+            weights = self.w_in_distr * self.ro * self.dts
+        else:
+            weights = self.w_in_distr * np.ones_like(self.V) / self.V.size
+
+        return weights
+
 
 ##################################################################
 
@@ -146,8 +157,12 @@ class LIF_Neuron(BaseNeuron):
 
         self.V += self.Vreset
 
+        self.Vhist = [self.V[-1]]
 
         self.times = [0]
+
+        if self.is_use_CBRD:
+            self.sigma = self.sigma / self.gl * np.sqrt(0.5 * self.gl / self.C)
 
 
     def update(self, dt, duration=None):
@@ -171,6 +186,11 @@ class LIF_Neuron(BaseNeuron):
 
 
             self.V += dt * dVdt
+
+            # print(self.V[-1])
+
+            self.Vhist.append(self.V[-1])
+
             self.Isyn = 0
             self.gsyn = 0
 
@@ -197,7 +217,7 @@ class LIF_Neuron(BaseNeuron):
             return self.t_states, self.w_in_distr * self.ro, self.times, self.w_in_distr * np.asarray(
                 self.firing),[]  # , self.t_states, self.V
         else:
-            return np.zeros(400), np.zeros(400), self.times, np.asarray(self.firing), []
+            return np.zeros(400), np.zeros(400), self.times, self.w_in_distr * np.asarray(self.firing), []
 #########################################################################################
 
 ##################################################################
@@ -233,6 +253,7 @@ class Channel:
             tau_y = self.get_tau_y(V)
             self.y[mask] = y_inf - (y_inf - self.y[mask]) * np.exp(-dt / tau_y)
             self.g *= self.y
+
 
     def get_I(self, V):
         I = self.g * (V - self.E)
@@ -456,8 +477,18 @@ class BorgGrahamNeuron(BaseNeuron):
         self.channels = [leak, dr_current, a_current, m_current, ahp, hcn]
 
 
+        if self.is_use_CBRD:
+            g_tot = 0
+            for ch in self.channels:
+                mask = np.ones_like(self.V, dtype=np.bool)
+                ch.update(0.001, self.V, mask)
+                g_tot += ch.get_g()
+            self.sigma = self.sigma / g_tot * np.sqrt(0.5 * g_tot / self.C)
+
+        self.roHsumMC = 0
+        self.ts4MC = 0
         # if self.saveV:
-        #     self.Vhist = [self.V[0]]
+        self.Vhist = [self.V[-1]]
         # if self.saveCV:
         #     self.CVhist = [0]
 
@@ -504,26 +535,41 @@ class BorgGrahamNeuron(BaseNeuron):
 
             self.V += dt * dVdt
 
+            if self.is_use_CBRD:
+                self.Vhist.append( np.sum(self.V * self.ro * self.dts) )
+            else:
+                self.Vhist.append( np.mean(self.V) )
+
+
             self.Isyn = 0
             self.gsyn = 0
 
             if (self.is_use_CBRD):
                 tau_m = self.C / g_tot
                 shift = self.update_ro(dt, dVdt, tau_m)
+                # print( np.abs(self.V[-1] - self.V[-2]) )
                 if shift:
                     self.V[:-1] = np.roll(self.V[:-1], 1)
                     self.V[0] = self.Vreset
                     for ch in self.channels:
                         ch.roll(self.max_roH_idx)
                         ch.reset(0)
+
+
+
+
             else:
                 spiking = np.logical_and((self.V >= self.Vt), (self.ts > self.refactory))
                 self.ts += dt
+
                 if np.sum(spiking) > 0:
                     self.V[spiking] = self.Vreset
                     self.ts[spiking] = 0
                     for ch in self.channels:
                         ch.reset(spiking)
+
+                self.roHsumMC = 1000 * self.w_in_distr * np.mean(spiking) / dt
+
 
 
             t += dt
@@ -532,13 +578,13 @@ class BorgGrahamNeuron(BaseNeuron):
             if self.is_use_CBRD:
                 self.firing.append(1000 * self.w_in_distr * self.ro[0])
             else:
-                self.firing.append(1000 * self.w_in_distr * np.mean(spiking) / dt)
+                self.firing.append(self.roHsumMC)
 
         if self.is_use_CBRD:
             return self.t_states, self.w_in_distr * self.ro, self.times, np.asarray(
                 self.firing),[]  # , self.t_states, self.V
         else:
-            return [], [], self.times, np.asarray(self.firing),[]  # , [], []
+            return np.array([0]), np.array([0]), self.times, np.asarray(self.firing),self.Vhist  # , [], []
 
 
 
@@ -622,14 +668,37 @@ class PoissonGenerator:
 
 
 #########################################################################################
-
-class Synapse:
+class SimlestSinapse:
     def __init__(self, params):
         self.w = params["w"]
         self.delay = params["delay"]
         self.pre = params["pre"]
         self.post = params["post"]
+        self.pre_hist = []
 
+    def update(self, dt):
+
+        if (len(self.pre_hist) == 0) and (self.delay > 0):
+            for _ in range(int(self.delay/dt)):
+                self.pre_hist.append(0)
+
+        pre_flow = self.pre.get_flow()
+
+        if (self.delay > 0):
+            self.pre_hist.append(pre_flow)
+            pre_flow = self.pre_hist.pop(0)
+
+        Isyn = self.w * pre_flow
+
+        self.post.add_Isyn(Isyn, 0)
+
+        return
+
+
+
+class Synapse(SimlestSinapse):
+    def __init__(self, params):
+        super(Synapse, self).__init__(params)
 
         self.tau_s = params["tau_s"] # 5.4
         self.tau = params["tau_a"] # 1
@@ -639,8 +708,7 @@ class Synapse:
         self.S = 0
         self.dsdt = 0
         self.tau_s_2 =  self.tau_s**2
-        self.pre_hist = []
-
+        
     def update(self, dt):
 
         if (len(self.pre_hist) == 0) and (self.delay > 0):
@@ -659,7 +727,7 @@ class Synapse:
 
 
         gsyn = self.S * self.gbarS * self.w
-        Isyn = gsyn * (self.post.V - self.Erev )
+        Isyn = gsyn * (self.post.getV() - self.Erev )
 
         self.post.add_Isyn(-Isyn, gsyn)
 
@@ -668,11 +736,17 @@ class Synapse:
 
 #####################################
 class Network:
-    def __init__(self, neurons, synapses):
+    def __init__(self, neurons, synapses, is_save_distrib = False):
         self.neurons = neurons
         self.synapses = synapses
 
         self.CVhist = [0]
+
+        self.is_save_distrib = is_save_distrib
+
+        self.x4p = np.empty(100, dtype=np.float)
+        self.Pxvar = np.empty((100, 0), dtype=np.float)
+
 
 
     def update(self, dt, duration=None):
@@ -686,6 +760,9 @@ class Network:
             sum_Pts = 0
             sum_flow = 0
 
+            if self.is_save_distrib:
+                Varr = np.empty(0, dtype=float)
+                weights = np.empty(0, dtype=float)
 
             for idx, neuron in enumerate(self.neurons):
                 ts_states, Pts, times, flow, _  = neuron.update(dt)
@@ -693,8 +770,18 @@ class Network:
                     sum_Pts += Pts
                     sum_flow += flow
 
+                if self.is_save_distrib:
+                    Varr = np.append( Varr, neuron.getV() )
+                    weights = np.append(weights,  neuron.get_weights() )
 
 
+            if self.is_save_distrib:
+                disr_y, distr_x = np.histogram(Varr, bins=self.x4p.size, weights=weights, range=[-80, -39], density=True)
+
+                # print(self.x4p.size)
+
+                self.Pxvar = np.append(self.Pxvar, disr_y.reshape(-1, 1), axis=1)
+                self.x4p = distr_x[:-1]
 
             for synapse in self.synapses:
                 synapse.update(dt)
@@ -712,6 +799,8 @@ class Network:
 
         return  ts_states, sum_Pts, times, sum_flow, generators_signal
 
+    def get_distrib(self):
+        return self.x4p, self.Pxvar
 
     def getflow(self):
         flow = 0
@@ -745,4 +834,25 @@ class Network:
 
         return signals
 
+########################################################################################################################
+# вспомогательные функции
+def get_contour_line(x, y, z):
+    from skimage import measure
+    from skimage.filters import gaussian
+
+    x = x.reshape(-1)
+    y = y.reshape(-1)
+
+    dx = np.mean(np.diff(x))
+    dy = np.mean(np.diff(y))
+    z = gaussian(z, sigma=1.5)
+
+    contours = measure.find_contours(z, 0.5)
+    # Display the image and plot all contours found
+
+    for n, contour in enumerate(contours):
+        x_area = contour[:, 1] * dx + np.min(x)
+        y_area = contour[:, 0] * dy + np.min(y)
+
+    return x_area, y_area
 
